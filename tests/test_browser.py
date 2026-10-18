@@ -85,6 +85,18 @@ class BrowserFixtureTests(unittest.TestCase):
         self.page.locator('#conversationList').evaluate('(el) => el.innerHTML += el.innerHTML')
         with self.assertRaises(BrowserError): self.worker.read_zalo(GROUPS[0])
 
+    def test_nested_title_nodes_are_not_duplicate_groups(self):
+        self.observed_layout()
+        self.page.locator('.conv-item-title__name .truncate').evaluate('(el) => el.classList.add("conv-item-title__name")')
+        self.assertEqual(check_zalo_group(self.page, GROUPS[0]), 'selected-row:real-row-1')
+
+    def test_title_badge_does_not_change_exact_group_label(self):
+        self.observed_layout()
+        self.page.locator('.conv-item-title__name').evaluate('(el) => el.insertAdjacentHTML("beforeend", "<span>49 phút</span>")')
+        self.assertEqual(check_zalo_group(self.page, GROUPS[0]), 'selected-row:real-row-1')
+        with self.assertRaisesRegex(BrowserError, 'My Documents'):
+            check_zalo_group(self.page, GROUPS[2])
+
     def test_download_expiry_and_validation(self):
         self.zalo()
         snapshot = self.worker.read_zalo(GROUPS[0]); token = snapshot['files'][0]['id']

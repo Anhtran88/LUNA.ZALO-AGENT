@@ -56,15 +56,31 @@ def check_zalo_group(page, group):
     # Only count names inside the conversation list, never global exact-text
     # matches (the same label also appears in header and hidden translations).
     items = page.locator(GROUP_ITEM)
-    names = items.all_text_contents()
-    matches = [i for i, name in enumerate(names) if name.strip() == group]
-    if len(matches) != 1:
-        raise BrowserError('Danh sách nhóm: không tìm thấy hoặc có nhiều dòng cùng tên. Hãy chọn đúng nhóm, không chọn gần đúng.')
-    item = items.nth(matches[0])
+    candidates = []
+    rows = set()
+    for index in range(items.count()):
+        item = items.nth(index)
+        info = item.evaluate(r"""(el, group) => {
+            const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+            const labels = [el, ...el.querySelectorAll('.truncate, [data-translate-inner]')];
+            const match = labels.some(label => clean(label.innerText) === clean(group));
+            const row = el.closest('.msg-item[data-id], [data-conversation-id], .conv-item') || el;
+            // Element index distinguishes real duplicate rows even if their IDs repeat.
+            const rowIndex = Array.from(document.querySelectorAll('#conversationList *')).indexOf(row);
+            return {match, rowIndex};
+        }""", group)
+        if info['match'] and info['rowIndex'] not in rows:
+            rows.add(info['rowIndex']); candidates.append(item)
+    count = len(candidates)
+    if count == 0:
+        raise BrowserError(f'Đang tìm “{group}”: chưa thấy tên khớp trong danh sách (vùng danh sách: {page.locator("#conversationList").count()}, phần tử tên: {items.count()}). Hãy kiểm tra Nhóm sẽ đọc và tự mở nhóm; không cần đồng bộ/gửi gì.')
+    if count > 1:
+        raise BrowserError(f'Đang tìm “{group}”: có {count} dòng hội thoại cùng tên. Dừng để tránh đọc nhầm; cần xác định đúng nhóm.')
+    item = candidates[0]
     if not item.is_visible():
-        raise BrowserError('Dòng nhóm chưa hiển thị trong danh sách. Hãy tự mở đúng nhóm rồi thử lại.')
+        raise BrowserError(f'Nhóm “{group}” chưa hiển thị trong danh sách. Hãy tự mở đúng nhóm rồi thử lại.')
     header = visible_unique(page.locator(GROUP_HEADER), 'Tiêu đề nhóm')
-    if header.inner_text().strip() != group:
+    if ' '.join(header.inner_text().split()) != ' '.join(group.split()):
         raise BrowserError('Nhóm đang mở không khớp nhóm được phép. Tự mở đúng nhóm rồi thử lại.')
     pane = visible_unique(page.locator('#messageView'), 'Vùng tin nhắn')
     # Legacy fixture/DOM with explicit IDs on both sides.

@@ -65,3 +65,5 @@ Chạy kiểm tra browser fixture trên máy đã cài Chromium Playwright:
 Linux có thể chỉ định `LUNA_TEST_CHROMIUM=/usr/bin/chromium` cho tests. Tải Chromium bằng Playwright trên cloud hiện bị network policy chặn tại cdn.playwright.dev; không tắt TLS hoặc bypass proxy. Trên Windows cần cài browser bằng lệnh phía trên.
 
 Kiểm tra hồi quy chọn nhóm: 3 UI tests xác minh My Documents là lựa chọn duy nhất khi chỉ cho phép nhóm này, đồng bộ hai tab và chặn khi không cho phép nhóm nào. Tổng suite hiện tại: 11 tests đạt trên Linux offscreen/Chromium fixture.
+
+Nhận diện tên nhóm: đếm theo dòng hội thoại, gộp các phần tử tên lồng nhau trong cùng dòng; đối chiếu nhãn tên riêng thay vì kèm badge/thời gian. Nếu thất bại, thông báo nêu tên nhóm đang tìm, số vùng danh sách/phần tử tên hoặc số dòng trùng; không in nội dung tin nhắn/DOM đầy đủ. Đây là hỗ trợ chẩn đoán, không chứng minh adapter đã chạy trên Zalo hiện hành.
