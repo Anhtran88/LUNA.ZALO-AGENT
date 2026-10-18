@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 from urllib.parse import urlparse
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFormLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QFileDialog, QMessageBox
 from .core import GROUPS, EOFFICE_URL, state_dir, validate_site
 
@@ -26,37 +27,45 @@ def protect_key(value: str):
     crypt.CryptProtectData.restype = wintypes.BOOL
     kernel.LocalFree.argtypes = [ctypes.c_void_p]
     kernel.LocalFree.restype = ctypes.c_void_p
-    if not crypt.CryptProtectData(ctypes.byref(source), 'Luna model key', None, None, None, 1, ctypes.byref(target)):
+    try:
+        protected = crypt.CryptProtectData(ctypes.byref(source), 'Luna model key', None, None, None, 1, ctypes.byref(target))
+    finally:
+        ctypes.memset(buffer, 0, len(buffer))
+    if not protected:
         raise OSError('DPAPI không lưu được key.')
     try:
         encrypted = ctypes.string_at(target.data, target.size)
     finally:
         kernel.LocalFree(ctypes.cast(target.data, ctypes.c_void_p))
-    folder = state_dir(); folder.mkdir(parents=True, exist_ok=True)
-    temporary = folder / 'model-key.dpapi.tmp'
+    from .browser import private_directory
+    folder = private_directory()
+    temporary = folder / ('model-key-' + __import__('uuid').uuid4().hex + '.tmp')
     temporary.write_bytes(encrypted)
     temporary.replace(folder / 'model-key.dpapi')
 
 
 class SettingsPage(QWidget):
+    browser_open = Signal(str)
+    browser_read = Signal(str)
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel('OFFLINE: cấu hình không bật live. “Kiểm tra” hiện chỉ kiểm tra local/mock, không chứng minh kết nối.'))
+        layout.addWidget(QLabel('Mặc định mock. Browser chỉ mở khi bạn bấm; đăng nhập thủ công. Firebase/AI live vẫn khóa.'))
         form, self.zstatus = self.card(layout, 'Zalo')
         self.groups = []
         for group in GROUPS:
             check = QCheckBox(group); check.setChecked(True); self.groups.append(check); form.addRow(check)
-        button = QPushButton('Mở Zalo Web / Quét QR — chưa triển khai')
-        button.setEnabled(False); form.addRow(button)
-        self.zlogin = QCheckBox('Tôi đã đăng nhập trong browser profile riêng (dành cho connector tương lai)'); form.addRow(self.zlogin)
-        test = QPushButton('Kiểm tra cấu hình mock'); test.setEnabled(False); self.zlogin.toggled.connect(test.setEnabled)
-        test.clicked.connect(lambda: self.zstatus.setText('Chưa cấu hình — mock, không kiểm tra phiên thật')); form.addRow(test)
+        button = QPushButton('Mở Zalo Web / Quét QR (Windows)')
+        button.clicked.connect(lambda: self.browser_open.emit('zalo')); form.addRow(button)
+        self.zlogin = QCheckBox('Tôi đã đăng nhập trong browser profile riêng (tự xác nhận; app còn kiểm tra DOM)'); form.addRow(self.zlogin)
+        test = QPushButton('Kiểm tra nhóm đang mở / đọc read-only'); test.setEnabled(False); self.zlogin.toggled.connect(test.setEnabled)
+        test.clicked.connect(lambda: self.browser_read.emit('zalo')); form.addRow(test)
         form, self.estatus = self.card(layout, 'eOffice')
         self.url = QLineEdit(EOFFICE_URL); form.addRow('URL', self.url)
-        self.elogin = QCheckBox('Tôi đã đăng nhập (không xác minh session trong scaffold)'); form.addRow(self.elogin)
-        test = QPushButton('Kiểm tra URL read-only/mock'); test.setEnabled(False); self.elogin.toggled.connect(test.setEnabled)
-        test.clicked.connect(self.check_site); form.addRow(test)
+        button = QPushButton('Mở eOffice / đăng nhập thủ công (Windows)'); button.clicked.connect(lambda: self.browser_open.emit('eoffice')); form.addRow(button)
+        self.elogin = QCheckBox('Tôi đã đăng nhập (app sẽ kiểm tra trang trước khi đọc)'); form.addRow(self.elogin)
+        test = QPushButton('Đọc bảng thống kê read-only'); test.setEnabled(False); self.elogin.toggled.connect(test.setEnabled)
+        test.clicked.connect(lambda: self.browser_read.emit('eoffice')); form.addRow(test)
         form, self.mstatus = self.card(layout, 'AI Model')
         form.addRow(QLabel('Provider: OpenAI/ChatGPT API-compatible. 9Router: để sau.'))
         self.model = QLineEdit(); self.model.setPlaceholderText('Model ID — chưa bật API')
@@ -74,7 +83,8 @@ class SettingsPage(QWidget):
         form.addRow('Project ID', self.project)
         form.addRow('Database URL', self.database)
         form.addRow(QLabel('Credential: không đọc/hiển thị. Rules/auth chưa xác minh.'))
-        test = QPushButton('Test read-only live — chưa triển khai'); test.setEnabled(False); form.addRow(test)
+        test = QPushButton('Kiểm tra định dạng cấu hình (không gọi Firebase)'); test.clicked.connect(self.check_firebase); form.addRow(test)
+        test = QPushButton('Firebase live read — khóa: chưa xác minh auth/Rules'); test.setEnabled(False); form.addRow(test)
         form, self.ostatus = self.card(layout, 'File / OneDrive')
         self.folder = QLineEdit(os.environ.get('LUNA_OUTPUT_DIR', ''))
         form.addRow('Thư mục', self.folder)
@@ -101,6 +111,7 @@ class SettingsPage(QWidget):
             self.key.clear()
             self.mstatus.setText('Chưa cấu hình live — key đã lưu DPAPI, chưa xác minh')
         except Exception:
+            self.key.clear()
             self.mstatus.setText('Lỗi — không lưu được key; cần Windows DPAPI. Không có plaintext fallback.')
 
     def check_site(self):
@@ -153,6 +164,15 @@ class SettingsPage(QWidget):
             if data.get('output_dir'): os.environ['LUNA_OUTPUT_DIR'] = data['output_dir']
         except (OSError, ValueError, TypeError):
             pass
+
+    def check_firebase(self):
+        try:
+            self.validate_firebase(self.project.text().strip(), self.database.text().strip())
+            if not self.project.text().strip() or not self.database.text().strip():
+                raise ValueError('Thiếu cấu hình')
+            self.fstatus.setText('Định dạng hợp lệ — chưa xác minh auth/Rules, chưa kết nối')
+        except (ValueError, TypeError):
+            self.fstatus.setText('Lỗi — project/database URL thiếu hoặc không hợp lệ')
 
     @staticmethod
     def validate_firebase(project, database):

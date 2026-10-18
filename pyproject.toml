@@ -7,7 +7,7 @@ name = "luna-zalo-agent"
 version = "0.1.0"
 description = "Windows-first Luna workspace, offline mock scaffold"
 requires-python = ">=3.12"
-dependencies = ["PySide6-Essentials==6.12.0"]
+dependencies = ["PySide6-Essentials==6.12.0", "playwright==1.64.0"]
 
 [project.scripts]
 luna = "luna.app:main"

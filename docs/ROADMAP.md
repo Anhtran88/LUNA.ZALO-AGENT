@@ -6,3 +6,5 @@
 5. Separately approved live edits with fresh preview, confirmation and verification. No autonomous writes, production rollouts or multi-agent platform in current scope.
 
 Offline UI implementation and Linux offscreen smoke validation completed in the current workspace. Native Windows, DPAPI and OneDrive synchronization remain unverified. No live integration enabled.
+
+Headed browser launch and conservative read-only DOM adapters added. Six browser fixture tests passed; real Zalo/eOffice DOM, Windows QR/profile lifecycle and native DPAPI still need operator validation. Unsupported DOM must stop, not be bypassed. No full-history/date-filter claim for browser reads.

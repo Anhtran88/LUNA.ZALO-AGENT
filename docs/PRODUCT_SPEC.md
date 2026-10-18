@@ -21,3 +21,6 @@ Folder picker checks existence and OS write-access flags without probe writes. A
 
 ## Offline MVP implemented
 Vietnamese desktop navigation: Chat, Zalo/Tệp, Báo cáo, eOffice, Hàng đợi offline, Cấu hình. Fixtures now include dated messages with source IDs, date filtering, persistent report history and TXT/JSON export. eOffice fixture table supports record/field selection and invalidates preview on edits. These are offline examples, never a claim to live extraction or AI inference.
+
+## User-triggered browser increment
+The existing mock workflow is retained. Settings now open a headed browser only on explicit operator request on Windows. Zalo extraction requires conservative exact-group and stable DOM identity checks, with selected attachment download; eOffice reads a single unambiguous table. Browser data is separated from fixture previews in a dedicated tab. Production DOM/selectors are unverified and unsupported layouts stop safely. Firebase and model calls remain disabled.

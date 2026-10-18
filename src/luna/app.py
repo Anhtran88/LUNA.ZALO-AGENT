@@ -4,8 +4,9 @@ import sys
 from PySide6.QtWidgets import (QApplication, QScrollArea, QComboBox, QDateEdit, QFormLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QPushButton, QTabWidget, QTextEdit, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem)
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QTimer
 from .settings import SettingsPage
+from .browser import BrowserWorker, BrowserError
 from .core import (GROUPS, ChatRequest, MockModel, Outbox, edit_preview, make_report,
     sample_files, save_local, save_selected, mock_messages, EOFFICE_RECORDS)
 
@@ -17,9 +18,14 @@ class Window(QMainWindow):
         self.resize(1000, 760)
         self.outbox = Outbox()
         self.report = None
+        self.browser = BrowserWorker()
+        self.pending_browser = None
+        self.closing_browser = False
+        self.browser_closed = False
+        self.live_snapshot = None
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
-        self.statusBar().showMessage('MOCK / DRY-RUN • Không kết nối tài khoản thật • Không gọi AI có phí')
+        self.statusBar().showMessage('Mock + Browser chỉ đọc theo yêu cầu • Firebase/AI live khóa • Không submit/gửi tin')
         layout = self.page('Chat')
         layout.addWidget(QLabel('Trợ lý mẫu — yêu cầu tổng hợp sẽ tạo báo cáo từ nhóm/thời gian đang chọn ở tab Zalo.'))
         self.chat_log = QTextEdit(); self.chat_log.setReadOnly(True)
@@ -75,7 +81,17 @@ class Window(QMainWindow):
         self.button(layout, 'Làm mới lịch sử local', self.refresh_queue)
         layout.addWidget(QLabel('Chưa có worker đồng bộ Firebase. Không tự thực thi hành động ngoài hệ thống khi có mạng.'))
 
+        layout = self.page('Browser chỉ đọc')
+        layout.addWidget(QLabel('Chỉ chạy sau khi bấm mở browser trong Cấu hình. Không gửi/submit. Nhóm lấy từ tab Zalo.'))
+        self.live_status = QLabel('Chưa đăng nhập / chưa mở browser'); self.live_status.setWordWrap(True); layout.addWidget(self.live_status)
+        self.live_text = QTextEdit(); self.live_text.setReadOnly(True); layout.addWidget(self.live_text)
+        self.live_files = QListWidget(); layout.addWidget(self.live_files)
+        self.button(layout, 'Tải ảnh/PDF browser đã chọn (xác nhận trước khi lưu)', self.download_live)
+        self.button(layout, 'Lưu báo cáo từ nội dung browser đã đọc', self.report_live)
         self.settings = SettingsPage()
+        self.settings.browser_open.connect(lambda site: self.guard(lambda: self.open_browser(site)))
+        self.settings.browser_read.connect(lambda site: self.guard(lambda: self.read_browser(site)))
+        self.browser_timer = QTimer(self); self.browser_timer.timeout.connect(self.poll_browser); self.browser_timer.start(100)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(self.settings)
         self.tabs.addTab(scroll, 'Cấu hình')
         self.populate(); self.update_current(); self.refresh_stats(); self.refresh_history(); self.refresh_queue()
@@ -196,6 +212,98 @@ class Window(QMainWindow):
         for i, row in enumerate(records):
             for j, key in enumerate(['kind', 'id', 'sync_state']): self.queue.setItem(i, j, QTableWidgetItem(str(row.get(key, ''))))
         self.queue.resizeColumnsToContents()
+
+
+    def run_browser(self, operation, callback, *args):
+        if self.pending_browser or self.closing_browser:
+            raise BrowserError('Browser đang xử lý; chờ hoàn tất trước khi thực hiện tiếp.')
+        self.pending_browser = (self.browser.submit(operation, *args), callback)
+        self.settings.setEnabled(False)
+        self.live_status.setText('Đang xử lý browser… Không tự xử lý CAPTCHA/OTP.')
+        self.tabs.setCurrentIndex(5)
+
+    def poll_browser(self):
+        if not self.pending_browser: return
+        future, callback = self.pending_browser
+        if not future.done(): return
+        self.pending_browser = None
+        self.settings.setEnabled(True)
+        try:
+            result = future.result()
+            if not self.closing_browser: callback(result)
+        except Exception as exc:
+            message = str(exc) if isinstance(exc, BrowserError) else 'Browser lỗi hoặc thiếu Chromium. Cài browser theo README; kiểm tra cửa sổ, phiên và UI. Không log URL/session.'
+            self.live_status.setText(message)
+            self.settings.zstatus.setText('Chưa xác minh phiên/nhóm')
+            self.settings.estatus.setText('Chưa xác minh trang/phiên')
+
+    def open_browser(self, site):
+        self.live_snapshot = None; self.live_files.clear(); self.live_text.clear()
+        self.run_browser('open', lambda message: self.live_status.setText(message), site, self.settings.url.text().strip())
+
+    def read_browser(self, site):
+        if site == 'zalo':
+            self.allowed_group()
+            if not self.settings.zlogin.isChecked(): raise BrowserError('Hãy tự quét QR/đăng nhập rồi đánh dấu đã đăng nhập.')
+            self.live_snapshot = None; self.live_files.clear(); self.live_text.clear()
+            self.run_browser('read_zalo', self.show_zalo, self.groups.currentText())
+        else:
+            if not self.settings.elogin.isChecked(): raise BrowserError('Hãy tự đăng nhập eOffice rồi xác nhận đã đăng nhập.')
+            self.live_snapshot = None; self.live_files.clear(); self.live_text.clear()
+            self.run_browser('read_eoffice', self.show_eoffice)
+
+    def show_zalo(self, snapshot):
+        self.live_snapshot = snapshot
+        self.live_text.setPlainText('ZALO READ-ONLY • ' + snapshot['group'] + '\n\n' + '\n\n'.join(snapshot['messages']))
+        self.live_status.setText(snapshot['warning'])
+        self.settings.zstatus.setText('Đã đọc DOM nhóm khớp — không chứng minh đủ lịch sử hoặc toàn bộ danh sách nhóm')
+        for file in snapshot['files']:
+            item = QListWidgetItem(file['name']); item.setData(Qt.ItemDataRole.UserRole, file['id'])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable); item.setCheckState(Qt.CheckState.Unchecked)
+            self.live_files.addItem(item)
+
+    def show_eoffice(self, snapshot):
+        self.live_text.setPlainText('EOFFICE READ-ONLY • ' + str(snapshot['count']) + ' dòng đang tải\n\n' + '\n'.join(' | '.join(row) for row in snapshot['rows']))
+        self.live_status.setText(snapshot['warning'])
+        self.settings.estatus.setText('Đã đọc một bảng DOM — chưa xác minh toàn bộ dữ liệu')
+
+    def download_live(self):
+        from .core import output_dir
+        self.allowed_group()
+        snapshot = self.live_snapshot
+        if not snapshot or snapshot['group'] != self.groups.currentText(): raise BrowserError('Hãy đọc lại đúng nhóm trước khi tải.')
+        tokens = [self.live_files.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.live_files.count()) if self.live_files.item(i).checkState() == Qt.CheckState.Checked]
+        if not tokens: raise BrowserError('Chọn ít nhất một file ảnh/PDF từ browser.')
+        folder = str(output_dir())
+        if QMessageBox.question(self, 'Xác nhận tải file', f'Lưu {len(tokens)} file vào {folder}? OneDrive client có thể tự đồng bộ.') != QMessageBox.StandardButton.Yes: return
+        def complete(records):
+            self.live_status.setText(f'Đã lưu {len(records)} file local; metadata pending_sync. OneDrive sync chưa xác minh.')
+            self.live_snapshot = None; self.live_files.clear(); self.refresh_queue()
+        self.run_browser('download', complete, snapshot['group'], tokens, self.outbox, folder)
+
+    def report_live(self):
+        self.allowed_group()
+        snapshot = self.live_snapshot
+        if not snapshot or snapshot['group'] != self.groups.currentText(): raise BrowserError('Chưa có nội dung đúng nhóm được phép.')
+        record = self.outbox.add('report', {'group': snapshot['group'], 'text': '[ZALO READ-ONLY — TRÍCH NỘI DUNG, CHƯA TÓM TẮT AI]\n' + snapshot['warning'] + '\n\n' + '\n\n'.join(snapshot['messages']), 'fixture': False, 'source': 'loaded_browser_dom', 'observed_at': snapshot['observed_at']})
+        self.outbox.add('audit', {'action': 'browser_report_local', 'report_id': record['id']})
+        self.refresh_history(record['id']); self.refresh_queue(); self.tabs.setCurrentIndex(2)
+
+    def closeEvent(self, event):
+        if self.browser_closed:
+            event.accept(); return
+        event.ignore()
+        if not self.closing_browser:
+            self.closing_browser = True
+            self.close_future = self.browser.shutdown()
+            self.statusBar().showMessage('Đang đóng browser và lưu session local…')
+        QTimer.singleShot(100, self.finish_close)
+
+    def finish_close(self):
+        if self.close_future.done():
+            self.browser_closed = True; self.close()
+        else:
+            QTimer.singleShot(100, self.finish_close)
 
 
 def main():

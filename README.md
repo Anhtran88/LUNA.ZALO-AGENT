@@ -1,53 +1,65 @@
 # Luna — ứng dụng desktop Windows
 
-MVP local-first bằng Python/PySide6, giao diện tiếng Việt. Không phải web app. Bản này hoạt động offline với dữ liệu mẫu; không mở Zalo/eOffice, không kết nối Firebase, không gọi OpenAI và không phát sinh phí API.
+Ứng dụng Python/PySide6 local-first, giao diện tiếng Việt. Mock vẫn hoạt động offline. Browser read-only chỉ mở khi người dùng bấm nút; không có chức năng gửi tin, submit hoặc sửa website. Firebase và model API chưa kết nối.
 
-## Chạy trên Windows
+## Cài và chạy trên Windows
 
-Cần Python 3.12+ (64-bit). Trong PowerShell tại thư mục repo:
+Python 3.12+ 64-bit, PowerShell trong checkout:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\python -m playwright install chromium
 .\.venv\Scripts\python -m luna
 ```
 
-Dependency duy nhất trực tiếp: `PySide6-Essentials==6.12.0`. Không cần Playwright hoặc trình duyệt cho bản mock. Chưa kiểm chứng native Windows/DPAPI; đã kiểm tra GUI Qt offscreen trên Linux.
+Dependency trực tiếp: PySide6-Essentials 6.12.0, Playwright 1.64.0. Chromium cần tải riêng; không tự cài browser lúc mở app. Browser thật chỉ hỗ trợ Windows, không mở tài khoản trong cloud Linux.
 
-## Các màn hình
+## Màn hình
 
-- **Chat:** phản hồi mock; yêu cầu có “tổng hợp”/“báo cáo” tạo báo cáo theo nhóm và ngày đang chọn. Không suy luận bằng AI thật.
-- **Zalo / Tệp:** chọn đúng một trong ba nhóm allowlist, lọc ngày, xem tin nhắn mẫu, chọn ảnh/PDF mẫu để lưu. File mẫu độc lập với thời gian tin nhắn.
-- **Báo cáo:** lịch sử local được đọc lại sau khi mở app; xem nguồn tin nhắn và xuất TXT/JSON.
-- **eOffice:** bảng thống kê hai hồ sơ mẫu; chọn hồ sơ/trường, nhập giá trị mới và xem đối chiếu. Preview mất hiệu lực khi đổi lựa chọn/nội dung. Không có nút submit hoạt động.
-- **Hàng đợi offline:** task, report, file metadata, preview/approval và audit; trạng thái pending_sync là chưa gửi RTDB. Không có sync worker.
-- **Cấu hình:** Zalo, eOffice, model, Firebase và thư mục OneDrive. Chọn thư mục có sẵn, bấm kiểm tra rồi lưu cấu hình local. Có thể bỏ chọn nhóm để chặn thao tác mẫu tương ứng.
+- **Chat:** phản hồi mock; “tổng hợp”/“báo cáo” tạo báo cáo mẫu theo nhóm/ngày đang chọn. Không gọi AI.
+- **Zalo / Tệp:** tin nhắn/file mẫu, lọc ngày, chọn ảnh/PDF để lưu. File mẫu độc lập với ngày.
+- **Báo cáo:** lịch sử local, xuất TXT/JSON; báo cáo browser ghi rõ chỉ trích DOM đang tải, chưa tóm tắt AI.
+- **eOffice:** bảng và preview chỉnh sửa dữ liệu mẫu. Preview mất hiệu lực khi đổi giá trị; không có thực thi ghi thật.
+- **Hàng đợi offline:** metadata/task/report/audit/preview pending_sync. Chưa có Firebase sync worker.
+- **Browser chỉ đọc:** kết quả từ cửa sổ browser người dùng đã mở; chọn/tải file và lưu báo cáo local.
+- **Cấu hình:** nút mở browser, xác nhận login, kiểm tra read-only, allowlist, model key, Firebase config và thư mục local.
 
-## Thử luồng hoàn chỉnh
+## Zalo QR và đọc-only — adapter thử nghiệm
 
-1. Trong Cấu hình, chọn thư mục local thử nghiệm. Nếu nằm trong OneDrive, client OneDrive có thể tự upload file; app không gọi API OneDrive.
-2. Trong Zalo/Tệp, chọn nhóm và khoảng ngày hôm qua–hôm nay; đọc tin nhắn mẫu.
-3. Chọn file mẫu và xác nhận lưu; tạo báo cáo rồi xuất TXT/JSON.
-4. Xem metadata/hàng đợi. Mỗi file có tên riêng và SHA-256, không ghi đè. Không tự xóa khi gần đầy; dừng ghi nếu còn dưới dung lượng file + 100 MiB. Không đo được quota OneDrive cloud.
-5. Trong eOffice, chọn hồ sơ/trường và nhập đề xuất; bấm preview. Không có thay đổi nào trên website thật.
+1. Chọn thư mục đích có sẵn trong Cấu hình; lưu cấu hình. Thư mục trong OneDrive sẽ được client OneDrive đồng bộ, app không gọi API OneDrive.
+2. Bấm **Mở Zalo Web / Quét QR**. Tự quét QR/OTP/CAPTCHA trong browser. App không xử lý thay.
+3. Tự mở nhóm chính xác trên Zalo. Chọn cùng tên nhóm trong tab Zalo/Tệp. Chỉ ba tên allowlist được phép; không tìm gần đúng.
+4. Trong Cấu hình, đánh dấu đã đăng nhập rồi bấm **Kiểm tra nhóm đang mở / đọc read-only**.
+5. Xem kết quả ở Browser chỉ đọc. Chọn file ảnh/PDF được nhận diện, xác nhận tải. Lưu báo cáo khi cần.
 
-## Cấu hình và dữ liệu local
+**Quan trọng:** selector DOM chưa được xác minh trên Zalo hiện hành/tài khoản thật. Adapter yêu cầu tên nhóm duy nhất trong danh sách DOM, header khớp và `data-conversation-id` khớp giữa mục nhóm và vùng tin nhắn. Nếu thiếu/khác/trùng, app dừng; không đọc toàn trang thay thế. Zalo có thể không cung cấp các marker này, khi đó cần cập nhật adapter dựa trên UI được phép kiểm tra. Danh sách ảo chưa tải hết không chứng minh không có tên trùng ngoài DOM; người dùng phải chọn nhóm rõ ràng. Chưa tự cuộn, lấy đủ lịch sử hoặc lọc ngày cho nội dung thật.
 
-Không có đường dẫn tài khoản cá nhân hoặc Firebase project cụ thể trong source. `.env.example` chỉ mô tả tên biến; app không tự đọc `.env`.
+Tải file chỉ hỗ trợ anchor `a[download]` rõ ràng trong vùng tin nhắn, host được phép, tên/snapshot còn khớp, file PNG/JPEG/PDF tối đa 25 MiB (kiểm tra kích thước sau browser download). Nút tải tùy biến, ảnh inline và file chỉ mở preview chưa được hỗ trợ. Không tự click menu/nút gần đúng. File lỗi/đổi nhóm dừng tải; đã lưu một phần trước lỗi sẽ vẫn còn, không tự tải lại.
 
-- `LUNA_OUTPUT_DIR`: thư mục local đã chọn (ví dụ BAO CAO trong OneDrive). Settings lưu lựa chọn cho lần chạy sau.
-- `LUNA_STATE_DIR`: tùy chọn thư mục cache/settings/outbox; mặc định `%LOCALAPPDATA%/Luna/offline` trên Windows. Giữ ngoài repo và OneDrive vì chứa nội dung local.
-- `FIREBASE_PROJECT_ID`, `FIREBASE_DATABASE_URL`: nhập trong Settings hoặc môi trường; chỉ lưu cấu hình, không gọi Firebase.
-- Model key: chỉ nhập khi cần; nút lưu dùng Windows DPAPI, không lưu plaintext, không đọc credential hiện có. Linux vô hiệu hóa nút lưu key. Chưa có chức năng dùng/giải mã key để gọi API.
+## eOffice read-only
 
-RTDB vẫn là canonical DB khi được triển khai và cấp quyền. JSON local là dữ liệu chờ đồng bộ, không phải một DB cloud thay thế. File binary không vào RTDB. Lưu local không chứng minh đã đồng bộ OneDrive.
+Bấm **Mở eOffice**, tự đăng nhập, trở về URL workflow đã duyệt. Đánh dấu đã đăng nhập rồi bấm **Đọc bảng thống kê read-only**. Chỉ đọc khi URL đúng, không còn password form và nhận diện đúng một bảng HTML có header. Thống kê hiện tại là số dòng bảng đang tải, không phải tổng nghiệp vụ qua nhiều trang. UI dùng iframe/custom grid hoặc nhiều bảng sẽ dừng để xác minh adapter. Preview chỉnh sửa vẫn chỉ dùng hồ sơ mẫu, chưa ánh xạ record thật; không submit/save.
 
-## Những chức năng chưa hoạt động thật
+## Cấu hình, session và file
 
-Mở QR Zalo, kiểm tra session, đọc website, Firebase read/sync, model API test và mọi ghi/gửi/trình/xóa/upload ngoài hệ thống đều chưa triển khai hoặc bị khóa. Các nút có nhãn mock chỉ kiểm tra mẫu/local. Checkbox “đã đăng nhập” không chứng minh phiên hợp lệ. ChatGPT subscription không cung cấp API miễn phí.
+- Thư mục xuất: chọn trong Settings hoặc `LUNA_OUTPUT_DIR`; không có đường dẫn tài khoản cá nhân hard-code.
+- Settings/outbox: `LUNA_STATE_DIR` hoặc `%LOCALAPPDATA%/Luna/offline`. Giữ ngoài repo/OneDrive.
+- Browser profile và key: **cố định** `%LOCALAPPDATA%/Luna/private`, không dùng LUNA_STATE_DIR. Chặn nằm dưới checkout hoặc OneDrive. Không xuất cookies, không ghi profile vào RTDB/model/log. Đóng app sẽ đóng context browser để giữ session local.
+- Key mới: ô password, nút lưu mã hóa Windows DPAPI theo Windows user; không plaintext fallback, không đọc key cũ hoặc gửi API. Native Windows roundtrip chưa kiểm chứng trong cloud Linux.
+- Firebase project/database: nhập Settings hoặc `FIREBASE_PROJECT_ID`/`FIREBASE_DATABASE_URL`. Nút kiểm tra chỉ validate định dạng; live read vẫn khóa chờ auth/Rules. Không truy vấn root, không đổi Rules/billing.
+- `.env.example` chỉ mô tả tên biến; không tự đọc .env.
 
-Cần kiểm chứng Windows, triển khai browser connectors đọc-only, xác minh Firebase auth/Rules, và phê duyệt API budget trước khi mở live. Không tự thay đổi Rules/billing.
+File lưu tên riêng chống ghi đè, SHA-256, metadata pending_sync. Không đưa binary vào RTDB. Không tự xóa; chặn lưu khi disk free dưới payload + 100 MiB. Không đo được quota OneDrive. “Đã lưu local” không chứng minh “đã sync cloud”. Không có API có phí hoặc thay đổi billing.
 
-## Kiểm tra đã thực hiện
+## Kiểm chứng và giới hạn
 
-Cài editable package và `pip check`; GUI Qt offscreen/event loop; chat/tổng hợp, lọc ngày; khôi phục lịch sử/cấu hình; PNG hợp lệ; lưu PNG/PDF/TXT/JSON và đối chiếu SHA-256; chống trùng tên/path traversal; chặn thiếu dung lượng; nhóm không khớp/trùng/bị bỏ quyền; URL lỗi và preview invalidation. Smoke script dùng thư mục tạm, không thêm test suite vào repo. Chưa kiểm tra Windows native, QR, OneDrive sync hoặc dịch vụ live.
+Đã chạy 6 tests browser fixture qua Chromium có sẵn trên Linux: exact group/duplicates/identity mismatch, file download/hash, eOffice table ambiguity và chặn live launch trên cloud. Request fixture được intercept hoàn toàn; không đăng nhập hoặc mở site thật. GUI offscreen qua kiểm tra 7 tab, xử lý browser bất đồng bộ, đóng app, mock report và Firebase config-only validation. DPAPI native, QR/session và selector production chưa được xác minh.
+
+Chạy kiểm tra browser fixture trên máy đã cài Chromium Playwright:
+
+```powershell
+.\.venv\Scripts\python -m unittest discover -s tests -v
+```
+
+Linux có thể chỉ định `LUNA_TEST_CHROMIUM=/usr/bin/chromium` cho tests. Tải Chromium bằng Playwright trên cloud hiện bị network policy chặn tại cdn.playwright.dev; không tắt TLS hoặc bypass proxy. Trên Windows cần cài browser bằng lệnh phía trên.
