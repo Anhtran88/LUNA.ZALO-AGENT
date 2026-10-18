@@ -29,7 +29,7 @@ Dependency trực tiếp: PySide6-Essentials 6.12.0, Playwright 1.64.0. Chromium
 
 1. Chọn thư mục đích có sẵn trong Cấu hình; lưu cấu hình. Thư mục trong OneDrive sẽ được client OneDrive đồng bộ, app không gọi API OneDrive.
 2. Bấm **Mở Zalo Web / Quét QR**. Tự quét QR/OTP/CAPTCHA trong browser. App không xử lý thay.
-3. Tự mở nhóm chính xác trên Zalo. Chọn cùng tên nhóm trong tab Zalo/Tệp. Chỉ ba tên allowlist được phép; không tìm gần đúng.
+3. Tự mở nhóm chính xác trên Zalo. Trong Cấu hình, chọn “Nhóm sẽ đọc”; lựa chọn này đồng bộ với tab Zalo/Tệp. Chỉ các nhóm đã đánh dấu cho phép mới xuất hiện. Nếu chỉ còn một nhóm được phép, app chọn nhóm đó; nếu bỏ quyền nhóm đang chọn và còn nhiều nhóm, phải chọn lại rõ ràng. Chỉ ba tên allowlist được phép; không tìm gần đúng.
 4. Trong Cấu hình, đánh dấu đã đăng nhập rồi bấm **Kiểm tra nhóm đang mở / đọc read-only**.
 5. Xem kết quả ở Browser chỉ đọc. Chọn file ảnh/PDF được nhận diện, xác nhận tải. Lưu báo cáo khi cần.
 
@@ -63,3 +63,5 @@ Chạy kiểm tra browser fixture trên máy đã cài Chromium Playwright:
 ```
 
 Linux có thể chỉ định `LUNA_TEST_CHROMIUM=/usr/bin/chromium` cho tests. Tải Chromium bằng Playwright trên cloud hiện bị network policy chặn tại cdn.playwright.dev; không tắt TLS hoặc bypass proxy. Trên Windows cần cài browser bằng lệnh phía trên.
+
+Kiểm tra hồi quy chọn nhóm: 3 UI tests xác minh My Documents là lựa chọn duy nhất khi chỉ cho phép nhóm này, đồng bộ hai tab và chặn khi không cho phép nhóm nào. Tổng suite hiện tại: 11 tests đạt trên Linux offscreen/Chromium fixture.

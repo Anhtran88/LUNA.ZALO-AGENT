@@ -94,6 +94,9 @@ class Window(QMainWindow):
         self.browser_timer = QTimer(self); self.browser_timer.timeout.connect(self.poll_browser); self.browser_timer.start(100)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(self.settings)
         self.tabs.addTab(scroll, 'Cấu hình')
+        self.settings.target_group.currentTextChanged.connect(self.sync_group_choices)
+        self.groups.currentTextChanged.connect(self.settings.target_group.setCurrentText)
+        self.sync_group_choices()
         self.populate(); self.update_current(); self.refresh_stats(); self.refresh_history(); self.refresh_queue()
 
     def page(self, title):
@@ -113,7 +116,19 @@ class Window(QMainWindow):
     def period(self):
         return self.start.date().toString('yyyy-MM-dd'), self.end.date().toString('yyyy-MM-dd')
 
+    def sync_group_choices(self, *_):
+        selected = self.settings.target_group.currentText()
+        allowed = [g.text() for g in self.settings.groups if g.isChecked()]
+        self.groups.blockSignals(True)
+        self.groups.clear(); self.groups.addItems(allowed)
+        self.groups.setCurrentIndex(allowed.index(selected) if selected in allowed else -1)
+        self.groups.blockSignals(False)
+        self.groups.setPlaceholderText('Chọn nhóm trong Cấu hình' if allowed else 'Chưa cho phép nhóm nào')
+        self.populate()
+
     def allowed_group(self):
+        if not self.groups.currentText():
+            raise ValueError('Chưa chọn nhóm để đọc. Hãy chọn nhóm cụ thể trong Cấu hình hoặc tab Zalo/Tệp.')
         if self.groups.currentText() not in [g.text() for g in self.settings.groups if g.isChecked()]:
             raise ValueError('Nhóm chưa được cho phép trong Cấu hình.')
 
@@ -132,7 +147,9 @@ class Window(QMainWindow):
 
     def populate(self, *_):
         self.files.clear(); self.messages.clear()
-        self.samples = sample_files(self.groups.currentText())
+        self.live_snapshot = None
+        if hasattr(self, 'live_files'): self.live_files.clear()
+        self.samples = sample_files(self.groups.currentText()) if self.groups.currentText() else []
         for sample in self.samples:
             item = QListWidgetItem(sample.name); item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked); self.files.addItem(item)

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFormLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QWidget, QComboBox, QVBoxLayout, QGroupBox, QFormLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QFileDialog, QMessageBox
 from .core import GROUPS, EOFFICE_URL, state_dir, validate_site
 
 
@@ -55,6 +55,8 @@ class SettingsPage(QWidget):
         self.groups = []
         for group in GROUPS:
             check = QCheckBox(group); check.setChecked(True); self.groups.append(check); form.addRow(check)
+        self.target_group = QComboBox(); self.target_group.addItems(GROUPS)
+        form.addRow('Nhóm sẽ đọc (phải đang mở trong browser)', self.target_group)
         button = QPushButton('Mở Zalo Web / Quét QR (Windows)')
         button.clicked.connect(lambda: self.browser_open.emit('zalo')); form.addRow(button)
         self.zlogin = QCheckBox('Tôi đã đăng nhập trong browser profile riêng (tự xác nhận; app còn kiểm tra DOM)'); form.addRow(self.zlogin)
@@ -93,8 +95,21 @@ class SettingsPage(QWidget):
         form.addRow(QLabel('OneDrive client chịu trách nhiệm sync. App chưa xác nhận được đã sync cloud.'))
         save = QPushButton('Lưu cấu hình không chứa secret'); save.clicked.connect(self.save_config); layout.addWidget(save)
         self.load_config()
+        for group in self.groups: group.toggled.connect(self.refresh_targets)
+        self.refresh_targets()
         self.url.textChanged.connect(lambda: self.estatus.setText('Chưa đăng nhập — cấu hình đã đổi'))
         self.database.textChanged.connect(lambda: self.fstatus.setText('Chưa cấu hình live'))
+
+    def refresh_targets(self, *_):
+        current = self.target_group.currentText()
+        allowed = [g.text() for g in self.groups if g.isChecked()]
+        self.target_group.blockSignals(True)
+        self.target_group.clear(); self.target_group.addItems(allowed)
+        selected = current if current in allowed else (allowed[0] if len(allowed) == 1 else '')
+        self.target_group.setCurrentIndex(allowed.index(selected) if selected in allowed else -1)
+        self.target_group.blockSignals(False)
+        self.target_group.setPlaceholderText('Chọn một nhóm được phép' if allowed else 'Chưa cho phép nhóm nào')
+        self.target_group.currentTextChanged.emit(self.target_group.currentText())
 
     def card(self, layout, title):
         box = QGroupBox(title); form = QFormLayout(box); layout.addWidget(box)
@@ -137,7 +152,7 @@ class SettingsPage(QWidget):
     def save_config(self):
         if not self.check_folder(): return
         try:
-            data = {'eoffice_url': self.url.text(), 'model': self.model.text(), 'groups': [g.text() for g in self.groups if g.isChecked()], 'output_dir': str(Path(self.folder.text()).expanduser().resolve()), 'firebase_project': self.project.text().strip(), 'firebase_database': self.database.text().strip()}
+            data = {'eoffice_url': self.url.text(), 'model': self.model.text(), 'groups': [g.text() for g in self.groups if g.isChecked()], 'selected_group': self.target_group.currentText(), 'output_dir': str(Path(self.folder.text()).expanduser().resolve()), 'firebase_project': self.project.text().strip(), 'firebase_database': self.database.text().strip()}
             validate_site(data['eoffice_url'])
             self.validate_firebase(data['firebase_project'], data['firebase_database'])
             folder = state_dir(); folder.mkdir(parents=True, exist_ok=True)
@@ -161,6 +176,7 @@ class SettingsPage(QWidget):
             self.database.setText(data.get('firebase_database', self.database.text()))
             self.url.setText(data.get('eoffice_url', EOFFICE_URL)); self.model.setText(data.get('model', ''))
             for group in self.groups: group.setChecked(group.text() in data.get('groups', list(GROUPS)))
+            self.target_group.setCurrentText(data.get('selected_group', self.target_group.currentText()))
             if data.get('output_dir'): os.environ['LUNA_OUTPUT_DIR'] = data['output_dir']
         except (OSError, ValueError, TypeError):
             pass
