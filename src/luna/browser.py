@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 import os
+import base64
 import uuid
 from .core import GROUPS, EOFFICE_URL, save_local
 
@@ -20,6 +21,8 @@ GROUP_ITEM = '#conversationList .conv-item-title__name'
 GROUP_HEADER = '#header .header-title'
 MESSAGE = '#messageView .text-message'
 ATTACHMENT = '#messageView a[download]'
+PHOTO = '#messageView .card--group-photo .zimg-el, #messageView .album__item .zimg-el, #messageView .card--group-photo__row__item .zimg-el'
+MAX_IMAGE_PIXELS = 16_000_000
 
 
 class BrowserError(ValueError):
@@ -132,7 +135,7 @@ def zalo_diagnostics(page):
     selectors = {'list': '#conversationList', 'titles': GROUP_ITEM, 'header': GROUP_HEADER,
                  'pane': '#messageView', 'text_messages': MESSAGE, 'download_links': ATTACHMENT,
                  'message_rows': '#messageView .chat-message, #messageView .message-item, #messageView [data-message-id]',
-                 'images': '#messageView img', 'links': '#messageView a'}
+                 'images': '#messageView img', 'photo_candidates': PHOTO, 'links': '#messageView a'}
     counts = {name: page.locator(selector).count() for name, selector in selectors.items()}
     panes = page.locator('#messageView')
     structure = {'visible_text_chars': 0, 'elements': 0, 'common_classes': []}
@@ -163,6 +166,13 @@ class BrowserWorker:
         self.playwright = None
         self.attachments = {}
         self.closing = False
+
+    def clear_attachments(self):
+        for attachment in self.attachments.values():
+            if attachment.get('element'):
+                try: attachment['element'].dispose()
+                except Exception: pass
+        self.attachments.clear()
 
     def submit(self, operation, *args):
         if self.closing: raise BrowserError('Browser đang đóng.')
@@ -202,13 +212,13 @@ class BrowserWorker:
 
     def read_zalo(self, group):
         page = self.page('zalo')
-        self.attachments.clear()
+        self.clear_attachments()
         identity = check_zalo_group(page, group)
-        if not page.locator(MESSAGE + ', ' + ATTACHMENT).count():
+        if not page.locator(MESSAGE + ', ' + ATTACHMENT + ', ' + PHOTO).count():
             from playwright.sync_api import TimeoutError as PlaywrightTimeout
             try:
                 page.wait_for_function('(selector) => !!document.querySelector(selector)',
-                                       arg=MESSAGE + ', ' + ATTACHMENT, timeout=CONTENT_WAIT_MS)
+                                       arg=MESSAGE + ', ' + ATTACHMENT + ', ' + PHOTO, timeout=CONTENT_WAIT_MS)
             except PlaywrightTimeout:
                 pass
         messages = [text.strip() for text in page.locator(MESSAGE).all_text_contents() if text.strip()]
@@ -224,16 +234,45 @@ class BrowserWorker:
                 continue
             token = uuid.uuid4().hex
             # Keep signed URLs only in memory; never expose them to logs/RTDB.
-            self.attachments[token] = (group, identity, name, href)
-            files.append({'id': token, 'name': name})
+            self.attachments[token] = {'kind': 'download', 'group': group, 'identity': identity, 'name': name, 'href': href}
+            files.append({'id': token, 'name': name, 'kind': 'download', 'label': name + ' — file đính kèm'})
+        photo_nodes = page.locator(PHOTO)
+        seen_nodes = set()
+        for index in range(photo_nodes.count()):
+            candidate = photo_nodes.nth(index).element_handle()
+            target = candidate.query_selector('img') or candidate
+            info = target.evaluate(r"""el => {
+                const pane = document.querySelector('#messageView');
+                const rect = el.getBoundingClientRect();
+                const excluded = !!el.closest('.reaction-emoji-icon, .emoji-sizer, .emoji-outer, .cloud-icon, [class*="avatar"]');
+                const image = el.tagName === 'IMG';
+                const background = !image && getComputedStyle(el).backgroundImage !== 'none';
+                return {node: [...pane.querySelectorAll('*')].indexOf(el), excluded,
+                    source: image ? (el.currentSrc || el.src) : getComputedStyle(el).backgroundImage,
+                    ready: image ? el.complete && el.naturalWidth >= 48 && el.naturalHeight >= 48 : background,
+                    width: Math.round(rect.width), height: Math.round(rect.height),
+                    naturalWidth: image ? el.naturalWidth : 0, naturalHeight: image ? el.naturalHeight : 0,
+                    text: !image && !!(el.innerText || '').trim()};
+            }""")
+            if (info['node'] in seen_nodes or info['excluded'] or not info['ready'] or info['text']
+                    or not target.is_visible() or min(info['width'], info['height']) < 48
+                    or info['width'] * info['height'] > MAX_IMAGE_PIXELS):
+                continue
+            seen_nodes.add(info['node'])
+            token = uuid.uuid4().hex
+            name = f'anh-hien-thi-{len(seen_nodes):03d}.png'
+            self.attachments[token] = {'kind': 'photo', 'group': group, 'identity': identity,
+                'name': name, 'element': target, 'source': info['source']}
+            files.append({'id': token, 'name': name, 'kind': 'photo',
+                'label': f"{name} — ảnh hiển thị {info['width']}×{info['height']}, không cam kết file gốc"})
         if check_zalo_group(page, group) != identity:
-            self.attachments.clear()
+            self.clear_attachments()
             raise BrowserError('Nhóm đã thay đổi trong khi đọc; hãy đọc lại.')
         from datetime import datetime, timezone
         diagnostics = zalo_diagnostics(page)
         if messages or files:
             state = 'ready' if messages else 'files_only'
-            warning = f'Đúng nhóm “{group}”: {len(messages)} tin nhắn chữ, {len(files)} file tải được trong phần đang tải. Chưa bao gồm toàn bộ lịch sử.'
+            warning = f'Đúng nhóm “{group}”: {len(messages)} tin chữ, {len(files)} mục file/ảnh. Ảnh hiển thị xuất PNG, có thể là thumbnail; không cam kết ảnh gốc. Chưa bao gồm toàn bộ lịch sử.'
         elif diagnostics['pane_structure']['visible_text_chars'] or diagnostics['counts']['images'] or diagnostics['counts']['message_rows']:
             state = 'unsupported_layout'
             warning = f'Đúng nhóm “{group}”, có cấu trúc nội dung nhưng chưa nhận diện được tin/file hỗ trợ. Bấm Chẩn đoán cấu trúc; không đọc toàn trang để đoán.'
@@ -259,9 +298,22 @@ class BrowserWorker:
         for token in tokens:
             check_zalo_group(page, group)
             if token not in self.attachments: raise BrowserError('Danh sách file đã hết hiệu lực; hãy đọc lại nhóm.')
-            saved_group, identity, name, href = self.attachments[token]
-            if saved_group != group or check_zalo_group(page, group) != identity:
+            attachment = self.attachments[token]
+            identity, name = attachment['identity'], attachment['name']
+            if attachment['group'] != group or check_zalo_group(page, group) != identity:
                 raise BrowserError('File không thuộc đúng định danh nhóm đang chọn.')
+            if attachment['kind'] == 'photo':
+                content, method = self.export_photo(attachment)
+                validate_binary(name, content)
+                if check_zalo_group(page, group) != identity:
+                    raise BrowserError('Nhóm đã đổi khi xuất ảnh; không lưu.')
+                metadata = save_local(name, content, {'group': group, 'connector': 'zalo_browser',
+                    'fixture': False, 'extraction': method, 'original_file': False}, outbox)
+                self.attachments.pop(token, None)
+                attachment['element'].dispose()
+                results.append(metadata)
+                continue
+            href = attachment['href']
             links = page.locator(ATTACHMENT)
             matches = [links.nth(i) for i in range(links.count())
                        if links.nth(i).get_attribute('download') == name
@@ -288,6 +340,46 @@ class BrowserWorker:
             results.append(metadata)
         return results
 
+    def export_photo(self, attachment):
+        element = attachment['element']
+        if not element.is_visible():
+            raise BrowserError('Ảnh không còn hiển thị; hãy đọc lại nhóm.')
+        info = element.evaluate(r"""el => {
+            const rect = el.getBoundingClientRect();
+            const image = el.tagName === 'IMG';
+            return {attached: el.isConnected && !!el.closest('#messageView'),
+                source: image ? (el.currentSrc || el.src) : getComputedStyle(el).backgroundImage,
+                width: rect.width, height: rect.height,
+                naturalPixels: image ? el.naturalWidth * el.naturalHeight : 0};
+        }""")
+        if (not info['attached'] or info['source'] != attachment['source']
+                or min(info['width'], info['height']) < 48
+                or info['width'] * info['height'] > MAX_IMAGE_PIXELS):
+            raise BrowserError('Ảnh đã đổi hoặc không có vùng hiển thị hợp lệ; hãy đọc lại nhóm.')
+        # Export only decoded pixels already present in the DOM. No fetch, request,
+        # credentials, CORS bypass, viewer/menu clicks or guessed download endpoint.
+        encoded = None
+        if 0 < info['naturalPixels'] <= MAX_IMAGE_PIXELS:
+            encoded = element.evaluate(r"""el => {
+                try {
+                    if (el.tagName !== 'IMG' || !el.complete) return null;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = el.naturalWidth; canvas.height = el.naturalHeight;
+                    canvas.getContext('2d').drawImage(el, 0, 0);
+                    return canvas.toDataURL('image/png').split(',')[1];
+                } catch (_) { return null; }
+            }""")
+        if encoded:
+            if len(encoded) > (MAX_FILE_BYTES * 4 // 3 + 8):
+                raise BrowserError('Bản xuất PNG quá lớn; không lưu.')
+            content, method = base64.b64decode(encoded, validate=True), 'decoded_display_asset_png'
+        else:
+            # Explicitly labeled display copy; never claim byte-for-byte original.
+            content, method = element.screenshot(type='png', timeout=5000), 'rendered_image_capture_png'
+        if element.evaluate("el => el.tagName === 'IMG' ? (el.currentSrc || el.src) : getComputedStyle(el).backgroundImage") != attachment['source']:
+            raise BrowserError('Nguồn ảnh đã đổi trong khi xuất; hãy đọc lại nhóm.')
+        return content, method
+
     def read_eoffice(self):
         page = self.page('eoffice')
         from .core import validate_site
@@ -313,7 +405,7 @@ class BrowserWorker:
         for session in self.sessions.values():
             try: session.context.close()
             except Exception: pass
-        self.sessions.clear(); self.attachments.clear()
+        self.sessions.clear(); self.clear_attachments()
         if self.playwright:
             self.playwright.stop(); self.playwright = None
 

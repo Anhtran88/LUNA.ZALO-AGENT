@@ -281,7 +281,7 @@ class Window(QMainWindow):
         self.live_status.setText(snapshot['warning'])
         self.settings.zstatus.setText('Đã xác minh nhóm • ' + snapshot.get('content_state', 'ready'))
         for file in snapshot['files']:
-            item = QListWidgetItem(file['name']); item.setData(Qt.ItemDataRole.UserRole, file['id'])
+            item = QListWidgetItem(file.get('label', file['name'])); item.setData(Qt.ItemDataRole.UserRole, file['id'])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable); item.setCheckState(Qt.CheckState.Unchecked)
             self.live_files.addItem(item)
 
@@ -298,7 +298,7 @@ class Window(QMainWindow):
         tokens = [self.live_files.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.live_files.count()) if self.live_files.item(i).checkState() == Qt.CheckState.Checked]
         if not tokens: raise BrowserError('Chọn ít nhất một file ảnh/PDF từ browser.')
         folder = str(output_dir())
-        if QMessageBox.question(self, 'Xác nhận tải file', f'Lưu {len(tokens)} file vào {folder}? OneDrive client có thể tự đồng bộ.') != QMessageBox.StandardButton.Yes: return
+        if QMessageBox.question(self, 'Xác nhận tải/xuất ảnh', f'Lưu {len(tokens)} mục vào {folder}? Ảnh hiển thị xuất PNG, có thể là thumbnail/bản chụp, không cam kết ảnh gốc. OneDrive client có thể tự đồng bộ.') != QMessageBox.StandardButton.Yes: return
         def complete(records):
             self.live_status.setText(f'Đã lưu {len(records)} file local; metadata pending_sync. OneDrive sync chưa xác minh.')
             self.live_snapshot = None; self.live_files.clear(); self.refresh_queue()

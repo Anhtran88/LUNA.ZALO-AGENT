@@ -130,6 +130,70 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertNotIn('https://', encoded)
         self.assertNotIn('group-1', encoded)
 
+    @staticmethod
+    def photo_data():
+        import struct, zlib
+        def chunk(kind, payload):
+            return struct.pack('!I',len(payload)) + kind + payload + struct.pack('!I', zlib.crc32(kind+payload)&0xffffffff)
+        return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR',struct.pack('!IIBBBBB',64,64,8,2,0,0,0)) + chunk(b'IDAT', zlib.compress((b'\0'+b'\x30\x80\xc0'*64)*64)) + chunk(b'IEND',b'')
+
+    def album(self):
+        import base64
+        self.observed_layout()
+        encoded = base64.b64encode(self.photo_data()).decode()
+        self.page.locator('#messageView').evaluate("""(el, src) => {
+            el.innerHTML = `<div class="card--group-photo"><div class="album__item">
+                <img class="zimg-el" style="width:90px;height:70px" src="${src}">
+                </div><div class="album__item"><img class="zimg-el" style="width:80px;height:60px" src="${src}"></div>
+                <span class="reaction-emoji-icon"><img class="zimg-el" style="width:80px;height:60px" src="${src}"></span></div>
+                <img class="avatar" style="width:80px;height:60px" src="${src}">`;
+        }""", 'data:image/png;base64,'+encoded)
+        self.page.wait_for_function("[...document.querySelectorAll('#messageView img')].every(el => el.complete && el.naturalWidth)")
+
+    def test_album_without_text_or_links_is_selectable(self):
+        self.album()
+        result = self.worker.read_zalo(GROUPS[0])
+        self.assertEqual(result['content_state'], 'files_only')
+        self.assertEqual(result['messages'], [])
+        self.assertEqual(len(result['files']), 2)  # excludes emoji and avatar
+        self.assertTrue(all(file['kind'] == 'photo' for file in result['files']))
+        self.assertNotIn('data:image', str(result))
+
+    def test_selected_photo_export_metadata_is_not_original(self):
+        import hashlib
+        self.album()
+        snapshot = self.worker.read_zalo(GROUPS[0])
+        records = self.worker.download(GROUPS[0], [snapshot['files'][0]['id']], Outbox(), self.temp.name)
+        self.assertEqual(len(records),1)
+        record = records[0]
+        content = (Path(self.temp.name)/record['relative_path']).read_bytes()
+        self.assertTrue(content.startswith(b'\x89PNG'))
+        self.assertEqual(record['sha256'],hashlib.sha256(content).hexdigest())
+        self.assertFalse(record['source']['original_file'])
+        self.assertEqual(record['source']['extraction'],'decoded_display_asset_png')
+        self.assertNotIn('data:image',str(record))
+
+    def test_changed_photo_source_is_not_exported(self):
+        self.album()
+        snapshot = self.worker.read_zalo(GROUPS[0])
+        self.page.locator('.album__item img').first.evaluate('(el) => el.src="about:blank"')
+        with self.assertRaises(BrowserError):
+            self.worker.download(GROUPS[0], [snapshot['files'][0]['id']], Outbox(), self.temp.name)
+        self.assertEqual(Outbox().records('file'), [])
+
+    def test_background_photo_capture_is_labeled(self):
+        import base64
+        self.observed_layout()
+        encoded = base64.b64encode(self.photo_data()).decode()
+        self.page.locator('#messageView').evaluate("""(el, src) => {
+            el.innerHTML = `<div class="card--group-photo"><div class="zimg-el" style="width:100px;height:80px;background-image:url('${src}')"></div></div>`;
+        }""", 'data:image/png;base64,' + encoded)
+        snapshot = self.worker.read_zalo(GROUPS[0])
+        self.assertEqual(len(snapshot['files']),1)
+        records = self.worker.download(GROUPS[0], [snapshot['files'][0]['id']], Outbox(), self.temp.name)
+        self.assertEqual(records[0]['source']['extraction'],'rendered_image_capture_png')
+        self.assertFalse(records[0]['source']['original_file'])
+
     def test_download_expiry_and_validation(self):
         self.zalo()
         snapshot = self.worker.read_zalo(GROUPS[0]); token = snapshot['files'][0]['id']
