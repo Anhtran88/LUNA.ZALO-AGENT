@@ -17,6 +17,8 @@ Dependency trực tiếp: PySide6-Essentials 6.12.0, Playwright 1.64.0. Chromium
 
 ## Màn hình
 
+Ứng dụng mở tại **Tổng quan**, điều hướng bằng sidebar bên trái. Các màn hình dữ liệu cũ vẫn giữ nguyên, bổ sung Nhật ký hoạt động và Chẩn đoán riêng.
+
 - **Chat:** phản hồi mock; “tổng hợp”/“báo cáo” tạo báo cáo mẫu theo nhóm/ngày đang chọn. Không gọi AI.
 - **Zalo / Tệp:** tin nhắn/file mẫu, lọc ngày, chọn ảnh/PDF để lưu. File mẫu độc lập với ngày.
 - **Báo cáo:** lịch sử local, xuất TXT/JSON; báo cáo browser ghi rõ chỉ trích DOM đang tải, chưa tóm tắt AI.
@@ -79,3 +81,12 @@ Nếu khung nội dung Zalo trống, kiểm tra trực tiếp khả năng hiển
 Chẩn đoán thực tế có `card--group-photo`, `zimg-el`, `album__item`, nhưng không có `.text-message` hoặc `a[download]`. Vì vậy ảnh được quét độc lập, không phụ thuộc tin nhắn chữ/link tải. Danh sách có nhãn ảnh hiển thị/kích thước để chọn và xác nhận trước khi lưu. Tên ảnh xuất là tên do app tạo; không suy đoán tên gốc. Ảnh IMG phải tải xong và có kích thước tự nhiên tối thiểu 48×48; ảnh quá nhỏ hoặc placeholder được bỏ qua. Giới hạn vùng xuất 16 triệu pixel, output tối đa 25 MiB. Nguồn ảnh giữ trong RAM, không vào metadata/RTDB/log.
 
 Đổi nhóm hoặc đổi nguồn ảnh sau khi quét sẽ chặn xuất, yêu cầu đọc lại. `source.original_file=false`, `source.extraction=decoded_display_asset_png` hoặc `rendered_image_capture_png` phân biệt bản xuất/chụp với download gốc. Không gửi request riêng, không bypass CORS, không mở viewer/menu hay thao tác ghi lên Zalo. Tin chữ dùng layout khác và PDF custom vẫn cần adapter được kiểm chứng riêng. Bộ kiểm tra hiện có 22 tests, gồm album không text/link, lọc emoji/avatar, ảnh đổi nguồn, hash/metadata và capture fallback.
+
+## Giao diện dashboard Luna
+Phong cách desktop: sidebar navy đậm, nền xám nhạt, thẻ trắng viền mảnh bo góc, điểm nhấn xanh ngọc; không chuyển sang web app và không thêm dependency giao diện. Tổng quan có breadcrumb/tiêu đề, thanh kết nối, 4 KPI, Giám sát Agent và Nguồn cập nhật.
+
+KPI tin nhắn/tệp tham chiếu lấy từ snapshot browser hiện tại; mục đã xử lý đếm file browser đã lưu local; báo cáo đếm bản ghi browser đã lưu, loại dữ liệu mock. Không có dữ liệu hiển thị 0. Đổi nhóm làm mất hiệu lực snapshot nên không dùng trạng thái đã xác minh của nhóm cũ. Nhật ký chỉ hiện thời gian/action/mã audit rút gọn.
+
+Mở Zalo dùng luồng mở headed browser hiện có. Kết nối nhóm và “Bắt đầu cập nhật • 1 lần” đều là một lần đọc theo yêu cầu, cần người dùng xác nhận đăng nhập trong Cấu hình. Chưa có polling/tự đồng bộ; nút Tạm dừng bị khóa và ghi rõ không có tác vụ nền. Điều hướng hoặc mở Tổng quan không mở browser hay gọi mạng. Mọi xác nhận lưu/tải, allowlist và quy tắc session/credential giữ nguyên.
+
+Kiểm tra UI dashboard: KPI loại mock, thao tác chỉ chạy một lần, nút khóa khi chưa đăng nhập, điều hướng các màn hình không gọi browser. Tổng suite 25 tests đạt; GUI offscreen/event loop được kiểm tra ở 1380×900 và 1000×700. Chưa nghiệm thu diện mạo native Windows; không mở tài khoản thật trong lượt chỉnh UI.

@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QApplication, QScrollArea, QComboBox, QDateEdit, 
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QPushButton, QTabWidget, QTextEdit, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem)
 from PySide6.QtCore import Qt, QDate, QTimer
+from .presentation import DesktopShell, STYLE
 from .settings import SettingsPage
 from .browser import BrowserWorker, BrowserError
 from .core import (GROUPS, ChatRequest, MockModel, Outbox, edit_preview, make_report,
@@ -14,8 +15,10 @@ from .core import (GROUPS, ChatRequest, MockModel, Outbox, edit_preview, make_re
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Luna • Bản thử nghiệm offline')
-        self.resize(1000, 760)
+        self.setWindowTitle('Luna • Không gian vận hành')
+        self.resize(1380, 900)
+        self.setMinimumSize(1000, 700)
+        self.setStyleSheet(STYLE)
         self.outbox = Outbox()
         self.report = None
         self.browser = BrowserWorker()
@@ -102,6 +105,13 @@ class Window(QMainWindow):
         self.groups.currentTextChanged.connect(self.settings.target_group.setCurrentText)
         self.sync_group_choices()
         self.populate(); self.update_current(); self.refresh_stats(); self.refresh_history(); self.refresh_queue()
+        self.takeCentralWidget()
+        self.shell = DesktopShell(self, self.tabs)
+        self.setCentralWidget(self.shell)
+        self.refresh_dashboard()
+
+    def refresh_dashboard(self):
+        if hasattr(self, 'dashboard'): self.dashboard.refresh()
 
     def page(self, title):
         widget = QWidget(); layout = QVBoxLayout(widget); self.tabs.addTab(widget, title)
@@ -154,6 +164,7 @@ class Window(QMainWindow):
         self.live_snapshot = None
         if hasattr(self, 'live_files'): self.live_files.clear()
         self.samples = sample_files(self.groups.currentText()) if self.groups.currentText() else []
+        self.refresh_dashboard()
         for sample in self.samples:
             item = QListWidgetItem(sample.name); item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked); self.files.addItem(item)
@@ -233,6 +244,7 @@ class Window(QMainWindow):
         for i, row in enumerate(records):
             for j, key in enumerate(['kind', 'id', 'sync_state']): self.queue.setItem(i, j, QTableWidgetItem(str(row.get(key, ''))))
         self.queue.resizeColumnsToContents()
+        self.refresh_dashboard()
 
 
     def run_browser(self, operation, callback, *args):
@@ -243,6 +255,7 @@ class Window(QMainWindow):
         self.settings.setEnabled(False)
         self.live_status.setText('Đang xử lý browser… Không tự xử lý CAPTCHA/OTP.')
         self.tabs.setCurrentIndex(5)
+        self.refresh_dashboard()
 
     def poll_browser(self):
         if not self.pending_browser: return
@@ -258,6 +271,8 @@ class Window(QMainWindow):
             self.live_status.setText(message)
             if site == 'zalo': self.settings.zstatus.setText('Chưa xác minh nhóm/nội dung — xem thông báo Browser chỉ đọc')
             else: self.settings.estatus.setText('Chưa xác minh trang/phiên — xem thông báo Browser chỉ đọc')
+        finally:
+            self.refresh_dashboard()
 
     def open_browser(self, site):
         self.live_snapshot = None; self.live_files.clear(); self.live_text.clear()
@@ -280,6 +295,7 @@ class Window(QMainWindow):
         self.live_text.setPlainText('ZALO READ-ONLY • ' + snapshot['group'] + '\n\n' + ('\n\n'.join(snapshot['messages']) or snapshot['warning']))
         self.live_status.setText(snapshot['warning'])
         self.settings.zstatus.setText('Đã xác minh nhóm • ' + snapshot.get('content_state', 'ready'))
+        self.refresh_dashboard()
         for file in snapshot['files']:
             item = QListWidgetItem(file.get('label', file['name'])); item.setData(Qt.ItemDataRole.UserRole, file['id'])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable); item.setCheckState(Qt.CheckState.Unchecked)
@@ -321,6 +337,7 @@ class Window(QMainWindow):
         self.last_diagnostics = diagnostics
         self.live_status.setText('Chẩn đoán cấu trúc sẵn sàng; có thể sao chép để kiểm tra selector, không chứa nội dung tin nhắn.')
         self.live_text.setPlainText(json.dumps(diagnostics, ensure_ascii=False, indent=2))
+        if hasattr(self, 'shell'): self.shell.diagnostic_view.setPlainText(json.dumps(diagnostics, ensure_ascii=False, indent=2))
 
     def copy_diagnostics(self):
         if not self.last_diagnostics:

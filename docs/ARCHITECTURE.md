@@ -14,3 +14,6 @@ Folder picker checks existence and OS write-access flags without probe writes. A
 
 ## Browser increment
 BrowserWorker uses a single executor thread owning Playwright sessions, snapshot tokens and downloads. UI receives bounded text/file metadata, never signed URLs or cookies. A seventh Browser read-only tab separates non-fixture results from existing mock screens. Browser opening is Windows-only and explicit; tests use intercepted local HTML with headless Chromium. Zalo selectors/identity markers require live verification before readiness can be claimed. Firebase remains config-validation only, model mock only.
+
+## Desktop presentation layer
+DesktopShell/Dashboard in presentation.py provide navy sidebar navigation and local dashboard. Existing data/connector screens remain inside the desktop page container; no web server, new backend or UI dependency. KPI projections read the current browser snapshot and existing outbox, excluding mock file/report records. Navigation and dashboard refresh are local/event-driven; they schedule no external reads or background sync. Buttons call existing guarded actions; unavailable pause remains disabled. Group/session/credential/approval logic is unchanged.

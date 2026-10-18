@@ -61,3 +61,37 @@ class GroupSelectionTests(unittest.TestCase):
         self.assertIn('chưa tải', w.live_text.toPlainText())
         with self.assertRaises(ValueError): w.report_live()
         self.assertEqual(w.outbox.records('report'), [])
+
+    def test_dashboard_counts_exclude_mock_records(self):
+        w = self.window
+        w.outbox.add('file', {'source': {'fixture': True}})
+        w.outbox.add('report', {'fixture': True})
+        w.refresh_dashboard()
+        self.assertEqual([value.text() for value in w.dashboard.values], ['0', '0', '0', '0'])
+        w.outbox.add('file', {'source': {'fixture': False}})
+        w.outbox.add('report', {'fixture': False})
+        w.live_snapshot = {'group': GROUPS[0], 'messages': ['one', 'two'], 'files': [{'id': 'file-ref'}], 'warning': 'Fixture snapshot for UI regression'}
+        w.refresh_dashboard()
+        self.assertEqual([value.text() for value in w.dashboard.values], ['2', '1', '1', '1'])
+
+    def test_dashboard_actions_require_login_and_never_poll(self):
+        w = self.window
+        self.assertFalse(w.dashboard.read_button.isEnabled())
+        self.assertFalse(w.dashboard.pause_button.isEnabled())
+        w.settings.zlogin.setChecked(True)
+        self.assertTrue(w.dashboard.read_button.isEnabled())
+        with patch.object(w, 'read_browser') as read:
+            w.dashboard.read_button.click()
+        read.assert_called_once_with('zalo')
+        self.assertIsNone(w.pending_browser)
+
+    def test_sidebar_keeps_existing_pages_and_default_dashboard(self):
+        w = self.window
+        self.assertEqual(w.tabs.currentIndex(), 7)
+        self.assertTrue(w.tabs.tabBar().isHidden())
+        with patch.object(w.browser, 'submit') as submit:
+            for page in range(w.tabs.count()):
+                w.shell.navigate(page)
+                self.assertEqual(w.tabs.currentIndex(), page)
+                self.assertGreaterEqual(w.shell.navigation.currentRow(), 0)
+            submit.assert_not_called()
