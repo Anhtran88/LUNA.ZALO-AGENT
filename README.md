@@ -33,7 +33,7 @@ Dependency trực tiếp: PySide6-Essentials 6.12.0, Playwright 1.64.0. Chromium
 4. Trong Cấu hình, đánh dấu đã đăng nhập rồi bấm **Kiểm tra nhóm đang mở / đọc read-only**.
 5. Xem kết quả ở Browser chỉ đọc. Chọn file ảnh/PDF được nhận diện, xác nhận tải. Lưu báo cáo khi cần.
 
-**Quan trọng:** selector DOM chưa được xác minh trên Zalo hiện hành/tài khoản thật. Adapter yêu cầu tên nhóm duy nhất trong danh sách DOM, header khớp và `data-conversation-id` khớp giữa mục nhóm và vùng tin nhắn. Nếu thiếu/khác/trùng, app dừng; không đọc toàn trang thay thế. Zalo có thể không cung cấp các marker này, khi đó cần cập nhật adapter dựa trên UI được phép kiểm tra. Danh sách ảo chưa tải hết không chứng minh không có tên trùng ngoài DOM; người dùng phải chọn nhóm rõ ràng. Chưa tự cuộn, lấy đủ lịch sử hoặc lọc ngày cho nội dung thật.
+**Quan trọng:** selector DOM chưa được xác minh trên Zalo hiện hành/tài khoản thật. Adapter yêu cầu tên nhóm duy nhất trong danh sách DOM, header khớp; dùng `data-conversation-id` khi DOM cung cấp, hoặc dòng `.conv-item` có trạng thái selected rõ ràng bên trong `.msg-item[data-id]`. Tên trong header/phần tử ẩn bên ngoài danh sách không được tính thành nhóm trùng. Nếu thiếu/khác/trùng, app dừng; không đọc toàn trang thay thế. Zalo có thể không cung cấp các marker này, khi đó cần cập nhật adapter dựa trên UI được phép kiểm tra. Danh sách ảo chưa tải hết không chứng minh không có tên trùng ngoài DOM; người dùng phải chọn nhóm rõ ràng. Chưa tự cuộn, lấy đủ lịch sử hoặc lọc ngày cho nội dung thật.
 
 Tải file chỉ hỗ trợ anchor `a[download]` rõ ràng trong vùng tin nhắn, host được phép, tên/snapshot còn khớp, file PNG/JPEG/PDF tối đa 25 MiB (kiểm tra kích thước sau browser download). Nút tải tùy biến, ảnh inline và file chỉ mở preview chưa được hỗ trợ. Không tự click menu/nút gần đúng. File lỗi/đổi nhóm dừng tải; đã lưu một phần trước lỗi sẽ vẫn còn, không tự tải lại.
 
@@ -54,7 +54,7 @@ File lưu tên riêng chống ghi đè, SHA-256, metadata pending_sync. Không �
 
 ## Kiểm chứng và giới hạn
 
-Đã chạy 6 tests browser fixture qua Chromium có sẵn trên Linux: exact group/duplicates/identity mismatch, file download/hash, eOffice table ambiguity và chặn live launch trên cloud. Request fixture được intercept hoàn toàn; không đăng nhập hoặc mở site thật. GUI offscreen qua kiểm tra 7 tab, xử lý browser bất đồng bộ, đóng app, mock report và Firebase config-only validation. DPAPI native, QR/session và selector production chưa được xác minh.
+Đã chạy 8 tests browser fixture qua Chromium có sẵn trên Linux: exact group/duplicates/identity mismatch, file download/hash, eOffice table ambiguity và chặn live launch trên cloud. Request fixture được intercept hoàn toàn; không đăng nhập hoặc mở site thật. GUI offscreen qua kiểm tra 7 tab, xử lý browser bất đồng bộ, đóng app, mock report và Firebase config-only validation. DPAPI native, QR/session và selector production chưa được xác minh.
 
 Chạy kiểm tra browser fixture trên máy đã cài Chromium Playwright:
 

@@ -61,6 +61,30 @@ class BrowserFixtureTests(unittest.TestCase):
         self.page.locator('#messageView').evaluate('(el) => el.removeAttribute("data-conversation-id")')
         with self.assertRaises(BrowserError): self.worker.read_zalo(GROUPS[0])
 
+    def observed_layout(self):
+        title = GROUPS[0]
+        html = f'''<div style="display:none">{title}</div>
+        <div id="conversationList"><div class="msg-item" data-id="real-row-1">
+        <div class="gridv2 conv-item selected"><div class="conv-item-title__name truncate grid-item"><div class="truncate">{title}</div></div></div></div></div>
+        <div id="header"><div class="header-title"><span>{title}</span></div></div>
+        <div id="messageView"><div class="text-message">Tin nhắn của nhóm đang chọn</div></div>'''
+        self.page.route('**/*', lambda route: route.fulfill(body=html, content_type='text/html; charset=utf-8'))
+        self.page.goto('https://chat.zalo.me/')
+        self.worker.sessions['zalo'] = BrowserSession(self.context, self.page)
+
+    def test_observed_sidebar_header_hidden_label_are_one_group(self):
+        self.observed_layout()
+        self.assertEqual(check_zalo_group(self.page, GROUPS[0]), 'selected-row:real-row-1')
+        self.assertEqual(self.worker.read_zalo(GROUPS[0])['messages'], ['Tin nhắn của nhóm đang chọn'])
+
+    def test_observed_layout_requires_selected_row_and_unique_name(self):
+        self.observed_layout()
+        self.page.locator('.conv-item').evaluate('(el) => el.classList.remove("selected")')
+        with self.assertRaises(BrowserError): self.worker.read_zalo(GROUPS[0])
+        self.page.locator('.conv-item').evaluate('(el) => el.classList.add("selected")')
+        self.page.locator('#conversationList').evaluate('(el) => el.innerHTML += el.innerHTML')
+        with self.assertRaises(BrowserError): self.worker.read_zalo(GROUPS[0])
+
     def test_download_expiry_and_validation(self):
         self.zalo()
         snapshot = self.worker.read_zalo(GROUPS[0]); token = snapshot['files'][0]['id']

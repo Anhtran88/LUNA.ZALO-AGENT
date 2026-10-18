@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 import os
 import uuid
-from .core import GROUPS, EOFFICE_URL, resolve_group, save_local
+from .core import GROUPS, EOFFICE_URL, save_local
 
 ZALO_URL = 'https://chat.zalo.me/'
 MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -53,26 +53,40 @@ def check_zalo_group(page, group):
     if group not in GROUPS: raise BrowserError('Nhóm không được phép.')
     if urlsplit(page.url).hostname != 'chat.zalo.me':
         raise BrowserError('Chưa ở Zalo Web; người dùng cần tự đăng nhập.')
-    # Count even hidden duplicates so virtualized/ambiguous lists fail conservatively.
-    names = page.locator(GROUP_ITEM).all_text_contents()
-    try:
-        resolve_group(group, [name.strip() for name in names])
-    except ValueError as exc:
-        raise BrowserError('Không tìm thấy hoặc trùng tên nhóm; không chọn gần đúng.') from exc
+    # Only count names inside the conversation list, never global exact-text
+    # matches (the same label also appears in header and hidden translations).
+    items = page.locator(GROUP_ITEM)
+    names = items.all_text_contents()
+    matches = [i for i, name in enumerate(names) if name.strip() == group]
+    if len(matches) != 1:
+        raise BrowserError('Danh sách nhóm: không tìm thấy hoặc có nhiều dòng cùng tên. Hãy chọn đúng nhóm, không chọn gần đúng.')
+    item = items.nth(matches[0])
+    if not item.is_visible():
+        raise BrowserError('Dòng nhóm chưa hiển thị trong danh sách. Hãy tự mở đúng nhóm rồi thử lại.')
     header = visible_unique(page.locator(GROUP_HEADER), 'Tiêu đề nhóm')
     if header.inner_text().strip() != group:
         raise BrowserError('Nhóm đang mở không khớp nhóm được phép. Tự mở đúng nhóm rồi thử lại.')
-    item = page.locator(GROUP_ITEM).nth(next(i for i, name in enumerate(names) if name.strip() == group))
-    # Bind the selected navigation entry to the message pane, not just a title.
-    # DOM builds without stable IDs are unsupported until their adapter is verified.
+    pane = visible_unique(page.locator('#messageView'), 'Vùng tin nhắn')
+    # Legacy fixture/DOM with explicit IDs on both sides.
     entry = item.locator('xpath=ancestor::*[@data-conversation-id][1]')
-    pane = page.locator('#messageView')
-    if entry.count() != 1 or pane.count() != 1:
-        raise BrowserError('UI không cung cấp định danh hội thoại rõ ràng; dừng đọc, cần xác minh adapter DOM.')
-    conversation_id = entry.get_attribute('data-conversation-id')
-    if not conversation_id or pane.get_attribute('data-conversation-id') != conversation_id:
+    if entry.count() == 1 and pane.get_attribute('data-conversation-id'):
+        identity = entry.get_attribute('data-conversation-id')
+        if identity and pane.get_attribute('data-conversation-id') == identity:
+            return 'conversation:' + identity
         raise BrowserError('Định danh nhóm/nội dung không khớp; không đọc hoặc tải file.')
-    return conversation_id
+    # Observed Zalo layout: .msg-item[data-id] contains a .conv-item row.
+    # Require an explicit selected marker; a matching header by itself is insufficient.
+    row = item.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " conv-item ")][1]')
+    owner = item.locator('xpath=ancestor::*[@data-id][1]')
+    if row.count() != 1 or owner.count() != 1:
+        raise BrowserError('Không xác định được dòng nhóm/data-id. Hãy mở nhóm trong danh sách; UI này cần kiểm tra thêm.')
+    classes = (row.get_attribute('class') or '').split()
+    selected = (row.get_attribute('aria-selected') == 'true' or 'selected' in classes
+                or row.get_attribute('data-selected') == 'true')
+    identity = owner.get_attribute('data-id')
+    if not selected or not identity:
+        raise BrowserError('Chưa xác nhận được dòng nhóm đang chọn. Hãy tự bấm đúng nhóm; app không tự đoán.')
+    return 'selected-row:' + identity
 
 
 def is_safe_attachment_url(value):
