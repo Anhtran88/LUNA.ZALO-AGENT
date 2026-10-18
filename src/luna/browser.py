@@ -14,6 +14,7 @@ from .core import GROUPS, EOFFICE_URL, save_local
 
 ZALO_URL = 'https://chat.zalo.me/'
 MAX_FILE_BYTES = 25 * 1024 * 1024
+CONTENT_WAIT_MS = 1500
 # Deliberately scoped to conversation navigation/header/message areas.
 GROUP_ITEM = '#conversationList .conv-item-title__name'
 GROUP_HEADER = '#header .header-title'
@@ -126,6 +127,29 @@ def validate_binary(name, content):
         raise BrowserError('File không phải ảnh/PDF hỗ trợ hoặc vượt giới hạn 25 MiB.')
 
 
+def zalo_diagnostics(page):
+    """Structural metadata only: no text, HTML, URL, IDs, attributes or secrets."""
+    selectors = {'list': '#conversationList', 'titles': GROUP_ITEM, 'header': GROUP_HEADER,
+                 'pane': '#messageView', 'text_messages': MESSAGE, 'download_links': ATTACHMENT,
+                 'message_rows': '#messageView .chat-message, #messageView .message-item, #messageView [data-message-id]',
+                 'images': '#messageView img', 'links': '#messageView a'}
+    counts = {name: page.locator(selector).count() for name, selector in selectors.items()}
+    panes = page.locator('#messageView')
+    structure = {'visible_text_chars': 0, 'elements': 0, 'common_classes': []}
+    if panes.count() == 1:
+        structure = panes.evaluate(r"""el => {
+            const classes = new Map();
+            const nodes = [...el.querySelectorAll('*')];
+            for (const node of nodes) for (const name of node.classList) {
+                if (/^[a-zA-Z_-]{1,48}$/.test(name)) classes.set(name, (classes.get(name) || 0) + 1);
+            }
+            return {visible_text_chars: (el.innerText || '').trim().length, elements: nodes.length,
+                    common_classes: [...classes.entries()].sort((a,b) => b[1]-a[1]).slice(0,24)};
+        }""")
+    return {'schema': 1, 'counts': counts, 'pane_structure': structure,
+            'privacy': 'Chỉ số lượng/cấu trúc CSS. Không có tin nhắn, tên người, URL, cookie hoặc mã hội thoại.'}
+
+
 @dataclass
 class BrowserSession:
     context: object
@@ -180,9 +204,14 @@ class BrowserWorker:
         page = self.page('zalo')
         self.attachments.clear()
         identity = check_zalo_group(page, group)
+        if not page.locator(MESSAGE + ', ' + ATTACHMENT).count():
+            from playwright.sync_api import TimeoutError as PlaywrightTimeout
+            try:
+                page.wait_for_function('(selector) => !!document.querySelector(selector)',
+                                       arg=MESSAGE + ', ' + ATTACHMENT, timeout=CONTENT_WAIT_MS)
+            except PlaywrightTimeout:
+                pass
         messages = [text.strip() for text in page.locator(MESSAGE).all_text_contents() if text.strip()]
-        if not messages:
-            raise BrowserError('Không nhận diện được tin nhắn. Có thể UI đã đổi hoặc nhóm chưa tải; không đọc toàn trang thay thế.')
         files = []
         links = page.locator(ATTACHMENT)
         for i in range(links.count()):
@@ -201,8 +230,25 @@ class BrowserWorker:
             self.attachments.clear()
             raise BrowserError('Nhóm đã thay đổi trong khi đọc; hãy đọc lại.')
         from datetime import datetime, timezone
-        return {'observed_at': datetime.now(timezone.utc).isoformat(), 'group': group, 'messages': messages, 'files': files,
-                'warning': 'Chỉ nội dung DOM hiện được tải. Chưa chứng minh đầy đủ lịch sử hoặc lọc ngày; không tự cuộn.'}
+        diagnostics = zalo_diagnostics(page)
+        if messages or files:
+            state = 'ready' if messages else 'files_only'
+            warning = f'Đúng nhóm “{group}”: {len(messages)} tin nhắn chữ, {len(files)} file tải được trong phần đang tải. Chưa bao gồm toàn bộ lịch sử.'
+        elif diagnostics['pane_structure']['visible_text_chars'] or diagnostics['counts']['images'] or diagnostics['counts']['message_rows']:
+            state = 'unsupported_layout'
+            warning = f'Đúng nhóm “{group}”, có cấu trúc nội dung nhưng chưa nhận diện được tin/file hỗ trợ. Bấm Chẩn đoán cấu trúc; không đọc toàn trang để đoán.'
+        else:
+            state = 'content_not_loaded'
+            warning = f'Đúng nhóm “{group}”, nhưng vùng nội dung chưa hiển thị tin nhắn/file. Đăng nhập không đồng nghĩa đã tải lịch sử. Kiểm tra trực tiếp trong Zalo rồi bấm Đọc lại; app không tự đồng bộ.'
+        return {'observed_at': datetime.now(timezone.utc).isoformat(), 'group': group,
+                'messages': messages, 'files': files, 'content_state': state,
+                'diagnostics': diagnostics, 'warning': warning}
+
+    def diagnose_zalo(self):
+        page = self.page('zalo')
+        if urlsplit(page.url).hostname != 'chat.zalo.me':
+            raise BrowserError('Chưa ở Zalo Web.')
+        return zalo_diagnostics(page)
 
     def download(self, group, tokens, outbox, output_folder):
         from .core import output_dir

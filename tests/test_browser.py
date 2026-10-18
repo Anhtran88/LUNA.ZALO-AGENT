@@ -97,6 +97,39 @@ class BrowserFixtureTests(unittest.TestCase):
         with self.assertRaisesRegex(BrowserError, 'My Documents'):
             check_zalo_group(self.page, GROUPS[2])
 
+    def test_attachment_only_conversation_is_readable(self):
+        self.zalo()
+        self.page.locator('.text-message').evaluate('(el) => el.remove()')
+        result = self.worker.read_zalo(GROUPS[0])
+        self.assertEqual(result['content_state'], 'files_only')
+        self.assertEqual(result['messages'], [])
+        self.assertEqual(len(result['files']), 1)
+
+    def test_empty_pane_is_not_group_or_login_failure(self):
+        self.observed_layout()
+        self.page.locator('#messageView').evaluate('(el) => {el.innerHTML=""; el.style.minHeight="100px";}')
+        result = self.worker.read_zalo(GROUPS[0])
+        self.assertEqual(result['content_state'], 'content_not_loaded')
+        self.assertEqual(result['files'], [])
+        self.assertEqual(result['messages'], [])
+
+    def test_unsupported_message_layout_is_not_faked_as_empty(self):
+        self.observed_layout()
+        self.page.locator('.text-message').evaluate('(el) => el.className="unknown-message-layout"')
+        result = self.worker.read_zalo(GROUPS[0])
+        self.assertEqual(result['content_state'], 'unsupported_layout')
+        self.assertEqual(result['messages'], [])
+
+    def test_diagnostics_excludes_private_content_and_urls(self):
+        import json
+        self.zalo()
+        self.page.locator('#messageView').evaluate('(el) => el.insertAdjacentHTML("beforeend", "<div class=message-body>PRIVATE_CONTENT_SENTINEL</div>")')
+        encoded = json.dumps(self.worker.diagnose_zalo(), ensure_ascii=False)
+        self.assertNotIn('PRIVATE_CONTENT_SENTINEL', encoded)
+        self.assertNotIn(GROUPS[0], encoded)
+        self.assertNotIn('https://', encoded)
+        self.assertNotIn('group-1', encoded)
+
     def test_download_expiry_and_validation(self):
         self.zalo()
         snapshot = self.worker.read_zalo(GROUPS[0]); token = snapshot['files'][0]['id']

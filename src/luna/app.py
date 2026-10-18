@@ -23,6 +23,7 @@ class Window(QMainWindow):
         self.closing_browser = False
         self.browser_closed = False
         self.live_snapshot = None
+        self.last_diagnostics = None
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
         self.statusBar().showMessage('Mock + Browser chỉ đọc theo yêu cầu • Firebase/AI live khóa • Không submit/gửi tin')
@@ -82,10 +83,13 @@ class Window(QMainWindow):
         layout.addWidget(QLabel('Chưa có worker đồng bộ Firebase. Không tự thực thi hành động ngoài hệ thống khi có mạng.'))
 
         layout = self.page('Browser chỉ đọc')
-        layout.addWidget(QLabel('Chỉ chạy sau khi bấm mở browser trong Cấu hình. Không gửi/submit. Nhóm lấy từ tab Zalo.'))
+        layout.addWidget(QLabel('Nguồn: hội thoại Zalo đang mở, không phải thư mục Windows. Đích lưu file: thư mục local/OneDrive trong Cấu hình.'))
         self.live_status = QLabel('Chưa đăng nhập / chưa mở browser'); self.live_status.setWordWrap(True); layout.addWidget(self.live_status)
         self.live_text = QTextEdit(); self.live_text.setReadOnly(True); layout.addWidget(self.live_text)
         self.live_files = QListWidget(); layout.addWidget(self.live_files)
+        self.button(layout, 'Đọc lại nhóm Zalo đã chọn', lambda: self.read_browser('zalo'))
+        self.button(layout, 'Chẩn đoán cấu trúc Zalo (không lấy nội dung riêng)', self.diagnose_zalo)
+        self.button(layout, 'Sao chép chẩn đoán để báo lỗi', self.copy_diagnostics)
         self.button(layout, 'Tải ảnh/PDF browser đã chọn (xác nhận trước khi lưu)', self.download_live)
         self.button(layout, 'Lưu báo cáo từ nội dung browser đã đọc', self.report_live)
         self.settings = SettingsPage()
@@ -234,14 +238,15 @@ class Window(QMainWindow):
     def run_browser(self, operation, callback, *args):
         if self.pending_browser or self.closing_browser:
             raise BrowserError('Browser đang xử lý; chờ hoàn tất trước khi thực hiện tiếp.')
-        self.pending_browser = (self.browser.submit(operation, *args), callback)
+        site = args[0] if operation == 'open' else ('eoffice' if operation == 'read_eoffice' else 'zalo')
+        self.pending_browser = (self.browser.submit(operation, *args), callback, site)
         self.settings.setEnabled(False)
         self.live_status.setText('Đang xử lý browser… Không tự xử lý CAPTCHA/OTP.')
         self.tabs.setCurrentIndex(5)
 
     def poll_browser(self):
         if not self.pending_browser: return
-        future, callback = self.pending_browser
+        future, callback, site = self.pending_browser
         if not future.done(): return
         self.pending_browser = None
         self.settings.setEnabled(True)
@@ -251,8 +256,8 @@ class Window(QMainWindow):
         except Exception as exc:
             message = str(exc) if isinstance(exc, BrowserError) else 'Browser lỗi hoặc thiếu Chromium. Cài browser theo README; kiểm tra cửa sổ, phiên và UI. Không log URL/session.'
             self.live_status.setText(message)
-            self.settings.zstatus.setText('Chưa xác minh phiên/nhóm')
-            self.settings.estatus.setText('Chưa xác minh trang/phiên')
+            if site == 'zalo': self.settings.zstatus.setText('Chưa xác minh nhóm/nội dung — xem thông báo Browser chỉ đọc')
+            else: self.settings.estatus.setText('Chưa xác minh trang/phiên — xem thông báo Browser chỉ đọc')
 
     def open_browser(self, site):
         self.live_snapshot = None; self.live_files.clear(); self.live_text.clear()
@@ -271,9 +276,10 @@ class Window(QMainWindow):
 
     def show_zalo(self, snapshot):
         self.live_snapshot = snapshot
-        self.live_text.setPlainText('ZALO READ-ONLY • ' + snapshot['group'] + '\n\n' + '\n\n'.join(snapshot['messages']))
+        self.last_diagnostics = snapshot.get('diagnostics')
+        self.live_text.setPlainText('ZALO READ-ONLY • ' + snapshot['group'] + '\n\n' + ('\n\n'.join(snapshot['messages']) or snapshot['warning']))
         self.live_status.setText(snapshot['warning'])
-        self.settings.zstatus.setText('Đã đọc DOM nhóm khớp — không chứng minh đủ lịch sử hoặc toàn bộ danh sách nhóm')
+        self.settings.zstatus.setText('Đã xác minh nhóm • ' + snapshot.get('content_state', 'ready'))
         for file in snapshot['files']:
             item = QListWidgetItem(file['name']); item.setData(Qt.ItemDataRole.UserRole, file['id'])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable); item.setCheckState(Qt.CheckState.Unchecked)
@@ -302,9 +308,25 @@ class Window(QMainWindow):
         self.allowed_group()
         snapshot = self.live_snapshot
         if not snapshot or snapshot['group'] != self.groups.currentText(): raise BrowserError('Chưa có nội dung đúng nhóm được phép.')
-        record = self.outbox.add('report', {'group': snapshot['group'], 'text': '[ZALO READ-ONLY — TRÍCH NỘI DUNG, CHƯA TÓM TẮT AI]\n' + snapshot['warning'] + '\n\n' + '\n\n'.join(snapshot['messages']), 'fixture': False, 'source': 'loaded_browser_dom', 'observed_at': snapshot['observed_at']})
+        if not snapshot['messages'] and not snapshot['files']:
+            raise BrowserError('Chưa có nội dung để báo cáo. Hãy đọc lại sau khi Zalo hiển thị tin/file hoặc lấy chẩn đoán cấu trúc.')
+        record = self.outbox.add('report', {'files': [file['name'] for file in snapshot['files']], 'group': snapshot['group'], 'text': '[ZALO READ-ONLY — TRÍCH NỘI DUNG, CHƯA TÓM TẮT AI]\n' + snapshot['warning'] + '\n\n' + '\n\n'.join(snapshot['messages']) + '\n\nFile nhận diện: ' + ', '.join(file['name'] for file in snapshot['files']), 'fixture': False, 'source': 'loaded_browser_dom', 'observed_at': snapshot['observed_at']})
         self.outbox.add('audit', {'action': 'browser_report_local', 'report_id': record['id']})
         self.refresh_history(record['id']); self.refresh_queue(); self.tabs.setCurrentIndex(2)
+
+    def diagnose_zalo(self):
+        self.run_browser('diagnose_zalo', self.show_diagnostics)
+
+    def show_diagnostics(self, diagnostics):
+        self.last_diagnostics = diagnostics
+        self.live_status.setText('Chẩn đoán cấu trúc sẵn sàng; có thể sao chép để kiểm tra selector, không chứa nội dung tin nhắn.')
+        self.live_text.setPlainText(json.dumps(diagnostics, ensure_ascii=False, indent=2))
+
+    def copy_diagnostics(self):
+        if not self.last_diagnostics:
+            raise BrowserError('Bấm Chẩn đoán cấu trúc trước.')
+        QApplication.clipboard().setText(json.dumps(self.last_diagnostics, ensure_ascii=False, indent=2))
+        self.statusBar().showMessage('Đã sao chép chẩn đoán cấu trúc; không sao chép tin nhắn hoặc session.')
 
     def closeEvent(self, event):
         if self.browser_closed:

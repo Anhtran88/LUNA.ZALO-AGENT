@@ -10,3 +10,5 @@ Files: explicit selected a[download] image/PDF attachments only, approved HTTPS 
 eOffice: manual login, approved workflow URL, reject visible password form, read only one unambiguous HTML table. Count loaded rows, not all pages. Custom grids/iframe/multiple tables unsupported. Edit preview remains fixture-only and cannot execute. Manual user actions in browser are outside automation; app does not click submit/save.
 
 All cloud/Firebase/model integrations remain inactive; mock flows remain available. Graceful shutdown waits for the queued browser action before closing context; a stalled download may require closing the browser manually.
+
+Read outcome now distinguishes ready/files_only/content_not_loaded/unsupported_layout. A missing text selector never bypasses attachment scanning. Empty snapshots cannot become reports. Structural diagnostics are user-triggered and expose only counts, character length and bounded alphabetic CSS class frequencies, not content/HTML/URLs/session/IDs. Login, group identity and extractable content are distinct states. No automatic history synchronization or whole-page fallback.

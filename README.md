@@ -67,3 +67,10 @@ Linux có thể chỉ định `LUNA_TEST_CHROMIUM=/usr/bin/chromium` cho tests. 
 Kiểm tra hồi quy chọn nhóm: 3 UI tests xác minh My Documents là lựa chọn duy nhất khi chỉ cho phép nhóm này, đồng bộ hai tab và chặn khi không cho phép nhóm nào. Tổng suite hiện tại: 11 tests đạt trên Linux offscreen/Chromium fixture.
 
 Nhận diện tên nhóm: đếm theo dòng hội thoại, gộp các phần tử tên lồng nhau trong cùng dòng; đối chiếu nhãn tên riêng thay vì kèm badge/thời gian. Nếu thất bại, thông báo nêu tên nhóm đang tìm, số vùng danh sách/phần tử tên hoặc số dòng trùng; không in nội dung tin nhắn/DOM đầy đủ. Đây là hỗ trợ chẩn đoán, không chứng minh adapter đã chạy trên Zalo hiện hành.
+
+## Kết nối được nhưng chưa có nội dung
+“My Documents” là hội thoại trong Zalo, không phải thư mục OneDrive. App xác minh nhóm trước, sau đó đợi tối đa 1,5 giây cho marker nội dung. Không có chữ vẫn kiểm tra file đính kèm. Trạng thái `files_only` cho phép tải file; `content_not_loaded` báo vùng chat chưa hiển thị dữ liệu; `unsupported_layout` báo có nội dung DOM nhưng adapter chưa nhận diện. Không tạo báo cáo rỗng hoặc coi preview ở danh sách là tin nhắn thật.
+
+Nếu khung nội dung Zalo trống, kiểm tra trực tiếp khả năng hiển thị lịch sử trên Zalo. Việc đồng bộ lịch sử/điện thoại là thao tác của người dùng theo hướng dẫn Zalo, app không tự bấm. Nếu nhìn thấy tin/file nhưng app chưa đọc được, bấm **Chẩn đoán cấu trúc Zalo**, sau đó **Sao chép chẩn đoán để báo lỗi**. Dữ liệu này chỉ gồm số lượng phần tử, độ dài chữ và thống kê class CSS của vùng tin nhắn; không có text tin nhắn, HTML, cookie, URL hoặc ID hội thoại. Không cần gửi session hay toàn bộ DOM.
+
+Đã kiểm tra bổ sung hội thoại chỉ có file, pane trống, layout chưa hỗ trợ, chẩn đoán không chứa dữ liệu riêng và chặn báo cáo rỗng; selector trên phiên Zalo thực vẫn cần xác minh khi có dữ liệu hiển thị.

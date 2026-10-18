@@ -52,3 +52,12 @@ class GroupSelectionTests(unittest.TestCase):
         self.assertIsNone(w.live_snapshot)
         self.assertEqual(w.groups.currentIndex(), -1)
         self.assertEqual(w.settings.target_group.currentIndex(), -1)
+
+    def test_empty_content_is_explained_without_report(self):
+        w = self.window
+        snapshot = {'group': GROUPS[0], 'messages': [], 'files': [], 'content_state': 'content_not_loaded', 'warning': 'Vùng nội dung chưa tải', 'diagnostics': {'counts': {'pane': 1}}}
+        w.show_zalo(snapshot)
+        self.assertIn('content_not_loaded', w.settings.zstatus.text())
+        self.assertIn('chưa tải', w.live_text.toPlainText())
+        with self.assertRaises(ValueError): w.report_live()
+        self.assertEqual(w.outbox.records('report'), [])
