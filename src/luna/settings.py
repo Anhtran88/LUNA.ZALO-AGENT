@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFormLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QFileDialog, QMessageBox
-from .core import GROUPS, EOFFICE_URL, state_dir
+from .core import GROUPS, EOFFICE_URL, state_dir, validate_site
 
 
 class Blob(ctypes.Structure):
@@ -62,15 +62,17 @@ class SettingsPage(QWidget):
         self.model = QLineEdit(); self.model.setPlaceholderText('Model ID — chưa bật API')
         self.key = QLineEdit(); self.key.setEchoMode(QLineEdit.EchoMode.Password); self.key.setPlaceholderText('Key mới, không đọc credential hiện có')
         form.addRow('Model', self.model); form.addRow('Key', self.key)
-        save = QPushButton('Lưu key bằng Windows DPAPI'); save.clicked.connect(self.save_key); form.addRow(save)
+        save = QPushButton('Lưu key bằng Windows DPAPI'); save.clicked.connect(self.save_key); save.setEnabled(os.name == 'nt'); form.addRow(save)
         form.addRow(QLabel('API có thể tính phí; chưa có ngân sách. Live test khóa, không gửi request.'))
         self.mtest = QPushButton('Test cấu hình mock — không gọi API'); self.mtest.setEnabled(False)
         self.key.textChanged.connect(self.model_gate); self.model.textChanged.connect(self.model_gate)
         self.mtest.clicked.connect(lambda: self.mstatus.setText('Chưa cấu hình live — dữ liệu nhập đủ cho mock, chưa xác minh key'))
         form.addRow(self.mtest)
         form, self.fstatus = self.card(layout, 'Firebase RTDB')
-        form.addRow('Project', QLabel(os.environ.get('FIREBASE_PROJECT_ID', 'Chưa cấu hình')))
-        form.addRow('Database', QLabel(os.environ.get('FIREBASE_DATABASE_URL', 'Chưa cấu hình')))
+        self.project = QLineEdit(os.environ.get('FIREBASE_PROJECT_ID', ''))
+        self.database = QLineEdit(os.environ.get('FIREBASE_DATABASE_URL', ''))
+        form.addRow('Project ID', self.project)
+        form.addRow('Database URL', self.database)
         form.addRow(QLabel('Credential: không đọc/hiển thị. Rules/auth chưa xác minh.'))
         test = QPushButton('Test read-only live — chưa triển khai'); test.setEnabled(False); form.addRow(test)
         form, self.ostatus = self.card(layout, 'File / OneDrive')
@@ -81,6 +83,8 @@ class SettingsPage(QWidget):
         form.addRow(QLabel('OneDrive client chịu trách nhiệm sync. App chưa xác nhận được đã sync cloud.'))
         save = QPushButton('Lưu cấu hình không chứa secret'); save.clicked.connect(self.save_config); layout.addWidget(save)
         self.load_config()
+        self.url.textChanged.connect(lambda: self.estatus.setText('Chưa đăng nhập — cấu hình đã đổi'))
+        self.database.textChanged.connect(lambda: self.fstatus.setText('Chưa cấu hình live'))
 
     def card(self, layout, title):
         box = QGroupBox(title); form = QFormLayout(box); layout.addWidget(box)
@@ -100,9 +104,11 @@ class SettingsPage(QWidget):
             self.mstatus.setText('Lỗi — không lưu được key; cần Windows DPAPI. Không có plaintext fallback.')
 
     def check_site(self):
-        parsed = urlparse(self.url.text())
-        valid = parsed.scheme == 'https' and parsed.hostname == 'eoffice.becamexijc.com' and not parsed.username and not parsed.password and parsed.port in (None, 443)
-        self.estatus.setText('Chưa đăng nhập — URL hợp lệ, session chưa xác minh' if valid else 'Lỗi — chỉ cho phép HTTPS eoffice.becamexijc.com')
+        try:
+            validate_site(self.url.text().strip())
+            self.estatus.setText('Chưa đăng nhập — URL hợp lệ, session chưa xác minh')
+        except ValueError:
+            self.estatus.setText('Lỗi — URL không thuộc trang eOffice đã duyệt')
 
     def choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, 'Chọn thư mục OneDrive')
@@ -120,10 +126,9 @@ class SettingsPage(QWidget):
     def save_config(self):
         if not self.check_folder(): return
         try:
-            data = {'eoffice_url': self.url.text(), 'model': self.model.text(), 'groups': [g.text() for g in self.groups if g.isChecked()], 'output_dir': str(Path(self.folder.text()).expanduser().resolve())}
-            parsed = urlparse(data['eoffice_url'])
-            if parsed.scheme != 'https' or parsed.hostname != 'eoffice.becamexijc.com' or parsed.username or parsed.password or parsed.port not in (None, 443) or parsed.query != urlparse(EOFFICE_URL).query:
-                raise ValueError('URL ngoài phạm vi hoặc query chưa được duyệt; không lưu để tránh chứa secret.')
+            data = {'eoffice_url': self.url.text(), 'model': self.model.text(), 'groups': [g.text() for g in self.groups if g.isChecked()], 'output_dir': str(Path(self.folder.text()).expanduser().resolve()), 'firebase_project': self.project.text().strip(), 'firebase_database': self.database.text().strip()}
+            validate_site(data['eoffice_url'])
+            self.validate_firebase(data['firebase_project'], data['firebase_database'])
             folder = state_dir(); folder.mkdir(parents=True, exist_ok=True)
             temporary = folder / 'settings.tmp'; temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8'); temporary.replace(folder / 'settings.json')
             os.environ['LUNA_OUTPUT_DIR'] = data['output_dir']
@@ -134,9 +139,30 @@ class SettingsPage(QWidget):
     def load_config(self):
         try:
             data = json.loads((state_dir() / 'settings.json').read_text(encoding='utf-8'))
-            self.folder.setText(data.get('output_dir', self.folder.text()))
+            if not isinstance(data, dict): raise ValueError('Invalid settings')
+            output = data.get('output_dir', self.folder.text())
+            if not isinstance(output, str) or (os.name != 'nt' and ('\\' in output or ':' in output)):
+                raise ValueError('Invalid native output path')
+            self.folder.setText(output)
+            validate_site(data.get('eoffice_url', EOFFICE_URL))
+            self.validate_firebase(data.get('firebase_project', ''), data.get('firebase_database', ''))
+            self.project.setText(data.get('firebase_project', self.project.text()))
+            self.database.setText(data.get('firebase_database', self.database.text()))
             self.url.setText(data.get('eoffice_url', EOFFICE_URL)); self.model.setText(data.get('model', ''))
             for group in self.groups: group.setChecked(group.text() in data.get('groups', list(GROUPS)))
-            if data.get('output_dir'): os.environ.setdefault('LUNA_OUTPUT_DIR', data['output_dir'])
+            if data.get('output_dir'): os.environ['LUNA_OUTPUT_DIR'] = data['output_dir']
         except (OSError, ValueError, TypeError):
             pass
+
+    @staticmethod
+    def validate_firebase(project, database):
+        import re
+        if project and not re.fullmatch(r'[a-z][a-z0-9-]{4,61}[a-z0-9]', project):
+            raise ValueError('Project ID không hợp lệ.')
+        if database:
+            parsed = urlparse(database)
+            if (parsed.scheme != 'https' or not parsed.hostname
+                    or not parsed.hostname.endswith(('.firebasedatabase.app', '.firebaseio.com'))
+                    or parsed.username or parsed.password or parsed.query or parsed.fragment
+                    or parsed.port not in (None, 443) or parsed.path not in ('', '/')):
+                raise ValueError('Database URL không hợp lệ; không chứa credential hoặc query.')

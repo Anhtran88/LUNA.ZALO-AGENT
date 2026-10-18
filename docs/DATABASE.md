@@ -8,3 +8,6 @@ Future canonical paths under /workspaces/{workspaceId}: tasks/{id}, reports/{id}
 Current JSON outbox stores task/report/file/approval/audit records locally as pending_sync. No RTDB sync is implemented. Future sync retries by stable ID, checks revisions and leaves conflicts visible. Offline permits drafts and local processing; never queues external writes for automatic execution on reconnect.
 
 Binary stays in Windows/OneDrive. Never place large binary/base64 in RTDB. Firebase Storage is not configured and binary uploads are not authorized. Do not change Rules or billing. No automatic expiry/deletion. Warn on capacity; block new writes/sync at limits and ask operator. OneDrive upload completion is unknown to this scaffold.
+
+## Current local implementation
+Outbox JSON is flushed and atomically renamed into place. History reloads on startup; malformed records appear as local errors instead of disappearing. File metadata includes local_state=saved, onedrive_state=unknown and sync_state=pending_sync. Local disk reserve is 100 MiB plus payload; OneDrive quota is not measured. Write/metadata failures retain recoverable output and report errors, without auto-deleting or retrying external actions. No cloud conflict/retry worker exists yet.

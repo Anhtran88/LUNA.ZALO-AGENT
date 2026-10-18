@@ -18,3 +18,6 @@ Settings cards: Zalo, eOffice, AI Model, Firebase RTDB, File/OneDrive. Status la
 eOffice URL is editable but stays within approved HTTPS domain and approved query; query changes need review to avoid storing credentials in URLs. UI previews still use fixtures. Model key input is masked; explicit save uses Windows user-scoped DPAPI, encrypted outside Git. No existing credential is read and no decryption/live consumption exists yet. No plaintext fallback. Live model test must later require valid configuration, billing/budget and explicit charge warning/confirmation; current test is mock only.
 
 Folder picker checks existence and OS write-access flags without probe writes. Actual save errors remain authoritative. Files saved locally are not reported as cloud-synced. Settings persist non-secret values under local app data; no Firebase binary upload. Zalo allowlist checkboxes restrict mock report/file actions.
+
+## Offline MVP implemented
+Vietnamese desktop navigation: Chat, Zalo/Tệp, Báo cáo, eOffice, Hàng đợi offline, Cấu hình. Fixtures now include dated messages with source IDs, date filtering, persistent report history and TXT/JSON export. eOffice fixture table supports record/field selection and invalidates preview on edits. These are offline examples, never a claim to live extraction or AI inference.
